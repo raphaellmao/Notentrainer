@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notentabelle – Prüfseite</title>
+<style>
+  body { margin: 0; padding: 16px; font: 15px/1.45 system-ui, -apple-system, sans-serif; background: #f4f1ea; color: #1d1d1f; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 28px 0 10px; }
+  p { margin: 0 0 12px; color: #555; max-width: 62ch; }
+  a { color: #24508f; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  figure { margin: 0; background: #fffdf8; border: 1px solid #e2dccf; border-radius: 10px; padding: 4px 4px 8px; }
+  figure svg { width: 100%; height: auto; display: block; color: #141414; }
+  figcaption { text-align: center; }
+  figcaption b { font-size: 20px; font-weight: 600; }
+  figcaption span { display: block; color: #6b6b6b; font-size: 12.5px; }
+  .kb { position: relative; height: 150px; background: #2b2b2b; border-radius: 8px; overflow: hidden; }
+  .kb svg { display: block; }
+  .key.white { fill: #fffdf8; }
+  .key.black { fill: #1b1b1b; }
+  .middle-c { fill: #8a8a8a; }
+  .kb text { font: 600 12px system-ui, sans-serif; fill: #333; text-anchor: middle; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Notentabelle</h1>
+  <p>Hier steht jede Note genau so, wie die App sie zeichnet (gleicher Code). Leg die Seite neben eine gedruckte Notentabelle und vergleiche die Positionen. Darunter siehst du beide Klaviaturen mit den Tastennamen. <a href="../">Zur App</a></p>
+  <div id="out"></div>
+</main>
+<script type="module">
+  import { CLEFS, levelNotes, helmholtzName, staffStep, ledgerSteps } from '../js/notes.js';
+  import { renderStaff } from '../js/staff.js';
+  import { keyboardLayout, renderKeyboard } from '../js/keyboard.js';
+
+  function position(step) {
+    if (step >= 0 && step <= 8) return step % 2 === 0 ? `${step / 2 + 1}. Linie` : `${(step + 1) / 2}. Zwischenraum`;
+    const n = ledgerSteps(step).length;
+    if (step < 0) return step % 2 === 0 ? `${n}. Hilfslinie unten` : n ? `unter der ${n}. Hilfslinie` : 'unter der 1. Linie';
+    return step % 2 === 0 ? `${n}. Hilfslinie oben` : n ? `über der ${n}. Hilfslinie` : 'über der 5. Linie';
+  }
+
+  const out = document.getElementById('out');
+  for (const clef of ['treble', 'bass']) {
+    const level1 = levelNotes(clef, 1);
+    const figs = levelNotes(clef, 2).map((note) => {
+      const tag = level1.includes(note) ? 'Stufe 1 + 2' : 'nur Stufe 2';
+      return `<figure>${renderStaff(clef, note, { label: helmholtzName(note) })}
+        <figcaption><b>${helmholtzName(note)}</b><span>${position(staffStep(clef, note))}</span><span>${tag}</span></figcaption></figure>`;
+    });
+    out.insertAdjacentHTML('beforeend', `<h2>${CLEFS[clef].name}</h2><div class="grid">${figs.join('')}</div>`);
+  }
+
+  out.insertAdjacentHTML('beforeend', '<h2>Klaviaturen</h2><p>Der graue Punkt markiert das mittlere C (c¹).</p>');
+  for (const clef of ['treble', 'bass']) {
+    out.insertAdjacentHTML('beforeend', `<p><b>${CLEFS[clef].name}</b> (${CLEFS[clef].keyboard.map(helmholtzName).join(' bis ')})</p><div class="kb" data-clef="${clef}"></div>`);
+  }
+  function drawKeyboards() {
+    for (const el of document.querySelectorAll('.kb')) {
+      const layout = keyboardLayout(CLEFS[el.dataset.clef].keyboard, el.clientWidth, el.clientHeight);
+      el.innerHTML = renderKeyboard(layout);
+      const labels = layout.keys
+        .filter((k) => !k.black)
+        .map((k) => `<text x="${k.x + k.w / 2}" y="${k.h * 0.72}">${helmholtzName(k.note)}</text>`)
+        .join('');
+      el.querySelector('svg').insertAdjacentHTML('beforeend', labels);
+    }
+  }
+  drawKeyboards();
+  addEventListener('resize', drawKeyboards);
+</script>
+</body>
+</html>
