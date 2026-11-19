@@ -4,18 +4,71 @@
 // das auf Touch-Geräten noch nicht als Aktion, erst beim Loslassen. Deshalb merkt sich
 // play() den Ton, falls der Audio-Kontext noch nicht läuft, und unlock() spielt ihn
 // beim Loslassen nach. Ab dann klingt jeder Ton sofort beim Antippen.
+//
+// iPhone: Steht der Lautlos-Schalter auf lautlos, spielt Safari Web-Audio-Töne
+// normalerweise nicht ab. Deshalb meldet sich die App als Wiedergabe (wie ein
+// Musik-Player): ab iOS 17 über navigator.audioSession, bei älteren iOS-Versionen
+// über ein stummes, endlos laufendes <audio>-Element.
+
+const isIOS = () =>
+  /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Stumme WAV-Datei (0,1 s), im Speicher erzeugt
+function silentWavUrl() {
+  const rate = 8000;
+  const samples = 800;
+  const buf = new ArrayBuffer(44 + samples * 2);
+  const v = new DataView(buf);
+  const text = (offset, s) => [...s].forEach((c, i) => v.setUint8(offset + i, c.charCodeAt(0)));
+  text(0, 'RIFF');
+  v.setUint32(4, 36 + samples * 2, true);
+  text(8, 'WAVE');
+  text(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); // PCM
+  v.setUint16(22, 1, true); // mono
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  text(36, 'data');
+  v.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
 
 export class Piano {
   constructor() {
     this.ctx = null;
     this.out = null;
     this.pending = null;
+    this.keepAlive = null;
+  }
+
+  // Ton auch bei Lautlos-Schalter: Wiedergabe-Modus anfordern (muss in einer Nutzeraktion passieren)
+  requestPlayback() {
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+        navigator.audioSession.type = 'playback';
+        return;
+      }
+      if (!navigator.audioSession && isIOS()) {
+        if (!this.keepAlive) {
+          this.keepAlive = new Audio(silentWavUrl());
+          this.keepAlive.loop = true;
+          this.keepAlive.setAttribute('playsinline', '');
+        }
+        if (this.keepAlive.paused) this.keepAlive.play().catch(() => {});
+      }
+    } catch {
+      // ohne diese Funktionen bleibt es beim normalen Verhalten
+    }
   }
 
   // Aus einem Nutzerereignis (pointerup, touchend, click, keydown) aufrufen
   unlock() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
+    this.requestPlayback();
     if (!this.ctx) {
       this.ctx = new AudioCtx();
       const limiter = this.ctx.createDynamicsCompressor();
