@@ -36,7 +36,7 @@ npm test
 (inklusive Hilfslinien, gemessen am gezeichneten SVG) und „Note → Taste“. Die Erwartungswerte sind von Hand
 eingetragen, nicht aus dem Code berechnet. `tests/uebung.test.js` prüft die Übungslogik.
 
-Zum Vergleich mit einer gedruckten Notentabelle: `tests/notentabelle.html` zeigt jede Note so, wie die App sie zeichnet.
+Zum Vergleich mit einer gedruckten Notentabelle: `notentabelle.html` (in der App über die Übersicht erreichbar) zeigt jede Note so, wie die App sie zeichnet.
 
 ## Lokal starten
 

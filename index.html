@@ -31,11 +31,18 @@
         <path class="mute" d="M15.5 9.5l5 5m0-5l-5 5"/>
       </svg>
     </button>
+    <a class="icon-btn" id="table-btn" href="notentabelle.html" aria-label="Alle Noten mit Namen (Lösung)" title="Alle Noten mit Namen">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="book" d="M4 5.5c2.6-1 5.3-1 8 .8 2.7-1.8 5.4-1.8 8-.8v13c-2.6-1-5.3-1-8 .8-2.7-1.8-5.4-1.8-8-.8zM12 6.3v13.3"/></svg>
+    </a>
     <div class="seg level" role="radiogroup" aria-label="Stufe">
+      <button type="button" role="radio" data-level="aufbau" aria-checked="false" title="mit Leitnoten beginnen, weitere Noten kommen dazu">Aufbau</button>
       <button type="button" role="radio" data-level="1" aria-checked="true" title="nur Noten ohne Hilfslinien">Stufe 1</button>
       <button type="button" role="radio" data-level="2" aria-checked="false" title="mit Hilfslinien">Stufe 2</button>
     </div>
-    <div class="count">Note <b id="count">1</b>/<span id="total">20</span></div>
+    <div class="count" aria-label="Note in dieser Runde"><b id="count">1</b>/<span id="total">20</span></div>
+    <button type="button" class="icon-btn" id="overview-btn" aria-label="Übersicht: welche Noten sitzen">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="bars" d="M5 19V12M10 19V6M15 19v-9M20 19V4"/></svg>
+    </button>
   </header>
   <div class="progress" aria-hidden="true"><i id="progress"></i></div>
 
@@ -54,9 +61,23 @@
       <h3 id="sum-wrong-title">Diese Noten waren falsch</h3>
       <div class="wrong-list" id="sum-wrong"></div>
       <p class="all-right" id="sum-all-right" hidden>Alles richtig – stark!</p>
+      <p class="unlocked" id="sum-unlocked" hidden></p>
       <button type="button" class="primary" id="again">Nochmal</button>
     </section>
+
+    <section class="overview" aria-labelledby="overview-title">
+      <h2 id="overview-title">Welche Noten sitzen?</h2>
+      <p class="legend">
+        <span class="sitzt">sitzt</span><span class="wackelt">wackelt</span><span class="ueben">üben</span><span class="neu">noch nicht geübt</span>
+      </p>
+      <p><a class="secondary" href="notentabelle.html">Alle Noten mit Namen ansehen (Lösung)</a></p>
+      <div id="overview-list"></div>
+      <p class="note-small">„Sitzt“ heißt: mindestens 3-mal geübt, zuletzt fast immer richtig und im Schnitt höchstens 3 Sekunden.</p>
+      <button type="button" class="primary" id="overview-back">Zurück zur Übung</button>
+    </section>
   </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <div class="keys"><div id="keyboard" aria-label="Klaviatur"></div></div>
 </body>

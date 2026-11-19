@@ -28,13 +28,13 @@
 <body>
 <main>
   <h1>Notentabelle</h1>
-  <p>Hier steht jede Note genau so, wie die App sie zeichnet (gleicher Code). Leg die Seite neben eine gedruckte Notentabelle und vergleiche die Positionen. Darunter siehst du beide Klaviaturen mit den Tastennamen. <a href="../">Zur App</a></p>
+  <p>Hier steht jede Note genau so, wie die App sie zeichnet (gleicher Code). Leg die Seite neben eine gedruckte Notentabelle und vergleiche die Positionen. Darunter siehst du beide Klaviaturen mit den Tastennamen. <a href="./" onclick="if (history.length > 1) { history.back(); return false; }">Zurück zur App</a></p>
   <div id="out"></div>
 </main>
 <script type="module">
-  import { CLEFS, levelNotes, helmholtzName, staffStep, ledgerSteps } from '../js/notes.js';
-  import { renderStaff } from '../js/staff.js';
-  import { keyboardLayout, renderKeyboard } from '../js/keyboard.js';
+  import { CLEFS, levelNotes, helmholtzName, staffStep, ledgerSteps } from './js/notes.js';
+  import { renderStaff } from './js/staff.js';
+  import { keyboardLayout, renderKeyboard } from './js/keyboard.js';
 
   function position(step) {
     if (step >= 0 && step <= 8) return step % 2 === 0 ? `${step / 2 + 1}. Linie` : `${(step + 1) / 2}. Zwischenraum`;

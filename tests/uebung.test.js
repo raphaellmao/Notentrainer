@@ -174,3 +174,86 @@ test('kaputter Speicher bricht nichts', () => {
   trainer.next();
   assert.doesNotThrow(() => trainer.answer('C2', 500));
 });
+
+// --- Aufbau mit Leitnoten und Übersicht ---
+
+import { AUFBAU_ORDER, AUFBAU_START, AUFBAU_KEY, mastery, readyToUnlock, noteOverview } from '../js/trainer.js';
+import { levelNotes } from '../js/notes.js';
+
+test('Aufbau: Reihenfolge enthält jede Note genau einmal und beginnt mit den Leitnoten', () => {
+  assert.deepEqual(AUFBAU_ORDER.treble.slice(0, 4), ['C4', 'G4', 'C5', 'G5']); // c¹ g¹ c² g²
+  assert.deepEqual(AUFBAU_ORDER.bass.slice(0, 4), ['C4', 'F3', 'C3', 'F2']); // c¹ f c F
+  for (const clef of ['treble', 'bass']) {
+    assert.deepEqual([...AUFBAU_ORDER[clef]].sort(), [...levelNotes(clef, 2)].sort(), clef);
+  }
+});
+
+test('Aufbau: Start mit vier Leitnoten je Schlüssel', () => {
+  assert.equal(buildPool('treble', 'aufbau', {}).length, AUFBAU_START);
+  assert.equal(buildPool('mixed', 'aufbau', { treble: 6, bass: 4 }).length, 10);
+});
+
+test('Einstufung: neu, üben, wackelt, sitzt', () => {
+  const stats = {};
+  const it = { clef: 'treble', note: 'G4' };
+  assert.equal(mastery(stats['treble:G4']), 'neu');
+  recordAnswer(stats, it, false, 2000);
+  recordAnswer(stats, it, false, 2000);
+  assert.equal(mastery(stats['treble:G4']), 'ueben');
+  for (let i = 0; i < 6; i++) recordAnswer(stats, it, true, 1500);
+  assert.equal(mastery(stats['treble:G4']), 'sitzt');
+  for (let i = 0; i < 6; i++) recordAnswer(stats, it, true, 6000); // richtig, aber langsam
+  assert.equal(mastery(stats['treble:G4']), 'wackelt');
+});
+
+test('Aufbau: schaltet erst frei, wenn alle Leitnoten sitzen – und dann paarweise', () => {
+  const storage = memoryStorage();
+  const trainer = new Trainer({ storage, rng: seeded(21) });
+  trainer.configure('treble', 'aufbau');
+  const seen = new Set();
+  let unlockedAt = null;
+  for (let i = 0; i < 200 && unlockedAt === null; i++) {
+    const item = trainer.next();
+    seen.add(item.note);
+    const res = trainer.answer(item.note, 1200);
+    if (res.unlocked.length) unlockedAt = res.unlocked.map((u) => u.note);
+  }
+  assert.deepEqual([...seen].sort(), ['C4', 'C5', 'G4', 'G5'], 'vorher nur Leitnoten');
+  assert.deepEqual(unlockedAt, ['F4', 'A4'], 'dann f¹ und a¹');
+  assert.equal(trainer.pool.length, 6);
+  assert.equal(JSON.parse(storage.getItem(AUFBAU_KEY)).treble, 6, 'Fortschritt gespeichert');
+  assert.equal(new Trainer({ storage }).unlocked.treble, 6, 'und wieder geladen');
+});
+
+test('Aufbau: keine Freischaltung, solange eine Note auf „üben“ steht', () => {
+  const stats = {};
+  for (const note of AUFBAU_ORDER.bass.slice(0, 4)) for (let i = 0; i < 5; i++) recordAnswer(stats, { clef: 'bass', note }, true, 1000);
+  assert.equal(readyToUnlock('bass', 4, stats), true);
+  recordAnswer(stats, { clef: 'bass', note: 'F2' }, false, 1000);
+  recordAnswer(stats, { clef: 'bass', note: 'F2' }, false, 1000);
+  assert.equal(mastery(stats['bass:F2']), 'ueben');
+  assert.equal(readyToUnlock('bass', 4, stats), false);
+});
+
+test('Aufbau: läuft bis alle 15 Noten frei sind und nicht darüber hinaus', () => {
+  const trainer = new Trainer({ rng: seeded(3) });
+  trainer.configure('bass', 'aufbau');
+  for (let i = 0; i < 3000; i++) trainer.answer(trainer.next().note, 1000);
+  assert.equal(trainer.unlocked.bass, 15);
+  assert.equal(trainer.pool.length, 15);
+});
+
+test('Übersicht: Status, Quote, Zeit und Sperre je Note', () => {
+  const stats = {};
+  recordAnswer(stats, { clef: 'treble', note: 'C4' }, true, 1000);
+  recordAnswer(stats, { clef: 'treble', note: 'C4' }, false, 3000);
+  const ov = noteOverview('treble', stats, 4);
+  assert.equal(ov.length, 15);
+  const c4 = ov.find((o) => o.note === 'C4');
+  assert.equal(c4.attempts, 2);
+  assert.equal(c4.rate, 0.5);
+  assert.equal(c4.avgMs, 2000);
+  assert.equal(c4.locked, false);
+  assert.equal(ov.find((o) => o.note === 'D4').locked, true);
+  assert.equal(ov.find((o) => o.note === 'D4').status, 'neu');
+});

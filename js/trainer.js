@@ -1,10 +1,11 @@
-// Übungslogik: Notenvorrat, adaptive Auswahl, Statistik pro Note, Runden.
+// Übungslogik: Notenvorrat, adaptive Auswahl, Statistik pro Note, Runden, Aufbau mit Leitnoten.
 // Ohne DOM; Speicher (localStorage) und Zufall werden hereingereicht.
 
 import { levelNotes } from './notes.js';
 
 export const ROUND_LENGTH = 20;
 export const STATS_KEY = 'notentrainer.statistik.v1';
+export const AUFBAU_KEY = 'notentrainer.aufbau.v1';
 
 const ALPHA = 0.35; // Gewicht der letzten Antwort in den gleitenden Mittelwerten
 // Längere Antwortzeiten zählen als 10 s (Statistik und Rundenschnitt), damit eine
@@ -12,12 +13,59 @@ const ALPHA = 0.35; // Gewicht der letzten Antwort in den gleitenden Mittelwerte
 export const MAX_MS = 10000;
 const NEW_WEIGHT = 3; // noch nie geübte Noten kommen bevorzugt dran
 
+// Aufbau: Reihenfolge, in der die Noten dazukommen. Die ersten vier sind Leitnoten,
+// an denen man sich orientiert; danach folgen jeweils ihre Nachbarn, Hilfslinien zuletzt.
+export const AUFBAU_ORDER = {
+  //        c¹    g¹    c²    g²  | f¹ a¹ | h¹ d² | d¹ e¹ | e² f² | a² h² | c³
+  treble: ['C4', 'G4', 'C5', 'G5', 'F4', 'A4', 'B4', 'D5', 'D4', 'E4', 'E5', 'F5', 'A5', 'B5', 'C6'],
+  //       c¹    f     c     F    | e g  | H d  | a h  | E G  | A D  | C
+  bass: ['C4', 'F3', 'C3', 'F2', 'E3', 'G3', 'B2', 'D3', 'A3', 'B3', 'E2', 'G2', 'A2', 'D2', 'C2'],
+};
+export const AUFBAU_START = 4;
+const AUFBAU_STEP = 2;
+
 export const itemKey = (item) => `${item.clef}:${item.note}`;
 
-// mode: 'treble' | 'bass' | 'mixed', level: 1 | 2
-export function buildPool(mode, level) {
+// mode: 'treble' | 'bass' | 'mixed', level: 1 | 2 | 'aufbau'
+// unlocked: im Aufbau freigeschaltete Anzahl je Schlüssel
+export function buildPool(mode, level, unlocked = {}) {
   const clefs = mode === 'mixed' ? ['treble', 'bass'] : [mode];
-  return clefs.flatMap((clef) => levelNotes(clef, level).map((note) => ({ clef, note })));
+  const notes = (clef) =>
+    level === 'aufbau' ? AUFBAU_ORDER[clef].slice(0, unlocked[clef] ?? AUFBAU_START) : levelNotes(clef, level);
+  return clefs.flatMap((clef) => notes(clef).map((note) => ({ clef, note })));
+}
+
+// Wie gut sitzt eine Note? 'neu' | 'sitzt' | 'wackelt' | 'ueben'
+export function mastery(stat) {
+  if (!stat || !stat.attempts) return 'neu';
+  if (stat.emaErr >= 0.45) return 'ueben';
+  if (stat.attempts >= 3 && stat.emaErr < 0.2 && stat.emaMs <= 3000) return 'sitzt';
+  return 'wackelt';
+}
+
+// Nächste Noten freischalten? Alle bisherigen mind. 3× geübt, keine auf „üben“, mind. 70 % sitzen.
+export function readyToUnlock(clef, count, stats) {
+  const states = AUFBAU_ORDER[clef].slice(0, count).map((note) => stats[itemKey({ clef, note })]);
+  if (states.some((s) => !s || s.attempts < 3 || mastery(s) === 'ueben')) return false;
+  return states.filter((s) => mastery(s) === 'sitzt').length >= Math.ceil(states.length * 0.7);
+}
+
+// Stand aller Noten eines Schlüssels für die Übersicht
+export function noteOverview(clef, stats, unlockedCount = AUFBAU_START) {
+  const open = new Set(AUFBAU_ORDER[clef].slice(0, unlockedCount));
+  return levelNotes(clef, 2).map((note) => {
+    const s = stats[itemKey({ clef, note })];
+    const attempts = s?.attempts ?? 0;
+    return {
+      clef,
+      note,
+      status: mastery(s),
+      attempts,
+      rate: attempts ? (attempts - s.errors) / attempts : null,
+      avgMs: attempts ? s.totalMs / attempts : null,
+      locked: !open.has(note),
+    };
+  });
 }
 
 // Gewicht einer Note für die Auswahl: oft falsch oder langsamer als der eigene
@@ -69,24 +117,34 @@ export function summarize(answers) {
     entry.count += 1;
     wrong.set(key, entry);
   }
-  return { total, correct, rate: total ? correct / total : 0, avgMs, wrong: [...wrong.values()] };
+  const unlocked = answers.flatMap((a) => a.unlocked ?? []);
+  return { total, correct, rate: total ? correct / total : 0, avgMs, wrong: [...wrong.values()], unlocked };
 }
 
-export function loadStats(storage) {
+function load(storage, key) {
   try {
-    const data = JSON.parse(storage?.getItem(STATS_KEY) || '{}');
+    const data = JSON.parse(storage?.getItem(key) || '{}');
     return data && typeof data === 'object' ? data : {};
   } catch {
     return {};
   }
 }
 
-export function saveStats(storage, stats) {
+function save(storage, key, value) {
   try {
-    storage?.setItem(STATS_KEY, JSON.stringify(stats));
+    storage?.setItem(key, JSON.stringify(value));
   } catch {
     // Speicher voll oder gesperrt (privates Fenster) – Übung läuft trotzdem weiter
   }
+}
+
+export const loadStats = (storage) => load(storage, STATS_KEY);
+export const saveStats = (storage, stats) => save(storage, STATS_KEY, stats);
+
+export function loadUnlocked(storage) {
+  const data = load(storage, AUFBAU_KEY);
+  const clamp = (n) => (Number.isInteger(n) ? Math.min(AUFBAU_ORDER.treble.length, Math.max(AUFBAU_START, n)) : AUFBAU_START);
+  return { treble: clamp(data.treble), bass: clamp(data.bass) };
 }
 
 export class Trainer {
@@ -95,6 +153,9 @@ export class Trainer {
     this.rng = rng;
     this.roundLength = roundLength;
     this.stats = loadStats(storage);
+    this.unlocked = loadUnlocked(storage);
+    this.mode = 'treble';
+    this.level = 1;
     this.pool = [];
     this.previous = null;
     this.current = null;
@@ -102,7 +163,9 @@ export class Trainer {
   }
 
   configure(mode, level) {
-    this.pool = buildPool(mode, level);
+    this.mode = mode;
+    this.level = level;
+    this.pool = buildPool(mode, level, this.unlocked);
     this.startRound();
   }
 
@@ -123,8 +186,21 @@ export class Trainer {
     const correct = tapped === item.note;
     recordAnswer(this.stats, item, correct, ms);
     saveStats(this.storage, this.stats);
-    this.answers.push({ item, tapped, correct, ms });
-    return { correct, item, done: this.answers.length >= this.roundLength };
+    const unlocked = this.level === 'aufbau' ? this.unlockIfReady(item.clef) : [];
+    this.answers.push({ item, tapped, correct, ms, unlocked });
+    return { correct, item, unlocked, done: this.answers.length >= this.roundLength };
+  }
+
+  // Im Aufbau die nächsten Noten freischalten, falls die bisherigen sitzen. Freigeschaltetes bleibt.
+  unlockIfReady(clef) {
+    const count = this.unlocked[clef];
+    const order = AUFBAU_ORDER[clef];
+    if (count >= order.length || !readyToUnlock(clef, count, this.stats)) return [];
+    const next = Math.min(order.length, count + AUFBAU_STEP);
+    this.unlocked[clef] = next;
+    save(this.storage, AUFBAU_KEY, this.unlocked);
+    this.pool = buildPool(this.mode, this.level, this.unlocked);
+    return order.slice(count, next).map((note) => ({ clef, note }));
   }
 
   get progress() {

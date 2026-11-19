@@ -3,7 +3,7 @@
 import { CLEFS, germanName, helmholtzName, frequency } from './notes.js';
 import { renderStaff } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
-import { Trainer } from './trainer.js';
+import { Trainer, noteOverview } from './trainer.js';
 import { Piano } from './audio.js';
 
 const SETTINGS_KEY = 'notentrainer.einstellungen.v1';
@@ -37,14 +37,26 @@ const ui = {
   sumWrong: $('#sum-wrong'),
   sumWrongTitle: $('#sum-wrong-title'),
   sumAllRight: $('#sum-all-right'),
+  sumUnlocked: $('#sum-unlocked'),
   again: $('#again'),
+  overviewBtn: $('#overview-btn'),
+  overviewList: $('#overview-list'),
+  overviewBack: $('#overview-back'),
+  toast: $('#toast'),
 };
+
+const LEVELS = ['aufbau', 1, 2];
+const parseLevel = (value) => (value === 'aufbau' ? 'aufbau' : Number(value));
+const STATUS_TEXT = { sitzt: 'sitzt', wackelt: 'wackelt', ueben: 'üben', neu: 'noch nicht geübt' };
+const seconds = (ms) => (ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 let layout = null; // aktuelles Klaviatur-Layout (in Pixeln)
 let marks = {}; // gefärbte Tasten
 let shownAt = 0; // Zeitpunkt, an dem die aktuelle Note erschienen ist
 let locked = true; // während der Rückmeldung keine weiteren Eingaben
 let timer = 0;
+let toastTimer = 0;
+let viewBeforeOverview = 'play';
 
 function loadSettings() {
   const fallback = { mode: 'treble', level: 1, sound: true };
@@ -52,7 +64,7 @@ function loadSettings() {
     const saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}');
     return {
       mode: ['treble', 'bass', 'mixed'].includes(saved.mode) ? saved.mode : fallback.mode,
-      level: [1, 2].includes(saved.level) ? saved.level : fallback.level,
+      level: LEVELS.includes(saved.level) ? saved.level : fallback.level,
       sound: typeof saved.sound === 'boolean' ? saved.sound : fallback.sound,
     };
   } catch {
@@ -70,13 +82,60 @@ function saveSettings() {
 
 function syncControls() {
   for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === settings.mode));
-  for (const b of document.querySelectorAll('[data-level]')) b.setAttribute('aria-checked', String(Number(b.dataset.level) === settings.level));
+  for (const b of document.querySelectorAll('[data-level]')) b.setAttribute('aria-checked', String(parseLevel(b.dataset.level) === settings.level));
   ui.sound.setAttribute('aria-pressed', String(settings.sound));
   ui.sound.setAttribute('aria-label', settings.sound ? 'Ton ist an – ausschalten' : 'Ton ist aus – einschalten');
 }
 
+// Während die Übersicht offen ist, merkt sich die App nur, wohin es danach zurückgeht.
 function setView(view) {
-  document.body.dataset.view = view;
+  if (document.body.dataset.view === 'overview') viewBeforeOverview = view;
+  else document.body.dataset.view = view;
+}
+
+function showToast(text) {
+  ui.toast.textContent = text;
+  ui.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 3000);
+}
+
+const noteList = (items) =>
+  items.map((it) => (settings.mode === 'mixed' ? `${helmholtzName(it.note)} (${it.clef === 'treble' ? 'Violin' : 'Bass'})` : helmholtzName(it.note))).join(', ');
+
+function showOverview() {
+  if (document.body.dataset.view !== 'overview') viewBeforeOverview = document.body.dataset.view;
+  ui.overviewList.innerHTML = ['treble', 'bass']
+    .map((clef) => {
+      const items = noteOverview(clef, trainer.stats, trainer.unlocked[clef]);
+      const count = (s) => items.filter((i) => i.status === s).length;
+      const open = items.filter((i) => !i.locked).length;
+      const cards = items
+        .map((i) => {
+          const detail = i.attempts ? `${Math.round(i.rate * 100)} % · ${seconds(i.avgMs)} s` : i.locked ? 'Aufbau: noch gesperrt' : '–';
+          return (
+            `<figure class="ov ${i.status}${i.locked ? ' locked' : ''}">${renderStaff(clef, i.note, { label: `${helmholtzName(i.note)} im ${CLEFS[clef].name}` })}` +
+            `<figcaption><b>${helmholtzName(i.note)}</b><span class="st">${STATUS_TEXT[i.status]}</span><span>${detail}</span></figcaption></figure>`
+          );
+        })
+        .join('');
+      return (
+        `<h3>${CLEFS[clef].name}</h3>` +
+        `<p class="ov-sum">${count('sitzt')} sitzen · ${count('wackelt')} wackeln · ${count('ueben')} üben · Aufbau: ${open} von ${items.length} frei</p>` +
+        `<div class="ov-grid">${cards}</div>`
+      );
+    })
+    .join('');
+  document.body.dataset.view = 'overview';
+  document.querySelector('.overview').scrollTop = 0;
+}
+
+function closeOverview() {
+  document.body.dataset.view = viewBeforeOverview;
+  if (viewBeforeOverview === 'play') {
+    drawKeyboard();
+    if (!locked) shownAt = performance.now(); // Zeit in der Übersicht zählt nicht
+  }
 }
 
 function startRound() {
@@ -132,15 +191,17 @@ function answer(tapped) {
   showFeedback(result);
   const { answered, total } = trainer.progress;
   ui.progress.style.width = `${(answered / total) * 100}%`;
+  if (result.unlocked.length) showToast(`Neu dazu: ${noteList(result.unlocked)}`);
   timer = setTimeout(result.done ? showSummary : nextNote, result.correct ? DELAY_RIGHT : DELAY_WRONG);
 }
 
 function showSummary() {
   const s = trainer.summary();
-  const seconds = (s.avgMs / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   ui.sumScore.textContent = `${s.correct}/${s.total}`;
   ui.sumRate.textContent = `richtig (${Math.round(s.rate * 100)} %)`;
-  ui.sumTime.textContent = `${seconds} s`;
+  ui.sumTime.textContent = `${seconds(s.avgMs)} s`;
+  ui.sumUnlocked.hidden = s.unlocked.length === 0;
+  ui.sumUnlocked.textContent = `Neu freigeschaltet: ${noteList(s.unlocked)}`;
   ui.sumWrong.innerHTML = s.wrong
     .map(
       (w) =>
@@ -175,7 +236,7 @@ for (const button of document.querySelectorAll('[data-mode]')) {
 
 for (const button of document.querySelectorAll('[data-level]')) {
   button.addEventListener('click', () => {
-    const level = Number(button.dataset.level);
+    const level = parseLevel(button.dataset.level);
     if (settings.level === level) return;
     settings.level = level;
     saveSettings();
@@ -191,6 +252,8 @@ ui.sound.addEventListener('click', () => {
 });
 
 ui.again.addEventListener('click', startRound);
+ui.overviewBtn.addEventListener('click', () => (document.body.dataset.view === 'overview' ? closeOverview() : showOverview()));
+ui.overviewBack.addEventListener('click', closeOverview);
 
 // Ton erst nach einer Nutzeraktion freischalten (Vorgabe der Handy-Browser)
 for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {
