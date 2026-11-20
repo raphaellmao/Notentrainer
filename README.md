@@ -51,3 +51,10 @@ Danach http://localhost:8793/ öffnen.
 Jeder Push auf `main` aktualisiert GitHub Pages automatisch.
 Bei jeder Veröffentlichung `VERSION` in `sw.js` erhöhen. Dann lädt der Service Worker alle Dateien neu vor und
 räumt alte Caches auf. Der Service Worker holt online ohnehin immer zuerst die neue Fassung („erst Netz, dann Cache“).
+
+## Am echten Klavier antworten
+
+Der Mikrofon-Knopf schaltet die Tonerkennung ein: Die App hört zu, du spielst die Note am Klavier.
+`js/pitch.js` erkennt die Tonhöhe (YIN-Verfahren) und einzelne Anschläge, `js/mic.js` holt das Mikrofon-Signal.
+Im Mikrofon-Modus spielt die App selbst keinen Ton, damit sie sich nicht selbst hört.
+`tests/tonerkennung.test.js` prüft die Erkennung mit künstlichen Klaviertönen für alle Noten.

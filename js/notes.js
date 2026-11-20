@@ -42,6 +42,14 @@ export function midiNumber(id) {
 // Gleichstufige Stimmung, a¹ = 440 Hz
 export const frequency = (id) => 440 * 2 ** ((midiNumber(id) - 69) / 12);
 
+// MIDI-Nummer → Note ("C4", "F#3" …); schwarze Tasten immer mit Kreuz
+const CHROMATIC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+export function noteFromMidi(midi) {
+  const octave = Math.floor(midi / 12) - 1;
+  const name = CHROMATIC[midi - (octave + 1) * 12];
+  return name.length === 2 ? `${name[0]}#${octave}` : `${name}${octave}`;
+}
+
 // Deutscher Tonname ohne Oktave: C D E F G A H (schwarze Tasten: Cis, Dis, Fis, Gis, Ais)
 export function germanName(id) {
   const { letter, sharp } = parseNote(id);

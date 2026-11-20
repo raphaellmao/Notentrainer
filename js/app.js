@@ -1,6 +1,7 @@
 // App: verbindet Notendarstellung, Klaviatur, Übungslogik und Klang mit der Oberfläche.
 
-import { CLEFS, germanName, helmholtzName, frequency } from './notes.js';
+import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote } from './notes.js';
+import { Microphone } from './mic.js';
 import { renderStaff } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
 import { Trainer, noteOverview } from './trainer.js';
@@ -43,6 +44,7 @@ const ui = {
   overviewList: $('#overview-list'),
   overviewBack: $('#overview-back'),
   toast: $('#toast'),
+  micBtn: $('#mic-btn'),
 };
 
 const LEVELS = ['aufbau', 1, 2];
@@ -167,28 +169,81 @@ function drawKeyboard() {
   ui.keyboard.innerHTML = renderKeyboard(layout, { marks });
 }
 
-function showFeedback(result) {
+function showFeedback(result, tapped) {
   if (!result) {
     ui.feedback.className = 'feedback';
-    ui.feedback.innerHTML = trainer.progress.answered === 0 ? '<span class="hint">Tippe die passende Taste.</span>' : '';
+    if (mic.active) {
+      ui.feedback.innerHTML = '<span class="listen">Spiel die Note am Klavier <span class="mic-level"><i></i></span></span>';
+    } else {
+      ui.feedback.innerHTML = trainer.progress.answered === 0 ? '<span class="hint">Tippe die passende Taste.</span>' : '';
+    }
     return;
   }
   const { correct, item } = result;
+  let played = '';
+  if (!correct) {
+    const sameLetter = parseNote(tapped).letter === parseNote(item.note).letter && !parseNote(tapped).sharp;
+    played = `<span class="played">${mic.active ? 'gespielt' : 'getippt'}: ${helmholtzName(tapped)}${sameLetter ? ' – falsche Oktave' : ''}</span>`;
+  }
   ui.feedback.className = `feedback ${correct ? 'right' : 'wrong'}`;
   ui.feedback.innerHTML =
     `<span class="verdict">${correct ? 'Richtig' : 'Falsch'}</span>` +
     `<span class="name">${germanName(item.note)}</span>` +
-    `<span class="octave">${helmholtzName(item.note)}</span>`;
+    `<span class="octave">${helmholtzName(item.note)}</span>${played}`;
+}
+
+// --- Mikrofon: am echten Klavier antworten ---
+
+const mic = new Microphone({
+  onNote: (midi) => {
+    if (locked || !trainer.current || document.body.dataset.view !== 'play') return;
+    answer(noteFromMidi(midi));
+  },
+  onLevel: (level) => {
+    const bar = ui.feedback.querySelector('.mic-level i');
+    if (bar) bar.style.width = `${Math.min(100, Math.sqrt(level) * 350)}%`;
+  },
+  onEnded: () => {
+    stopMic();
+    showToast('Mikrofon wurde beendet. Zum Weitermachen wieder antippen.');
+  },
+});
+
+async function startMic() {
+  ui.micBtn.disabled = true;
+  try {
+    await mic.start();
+    showToast('Mikrofon an – spiel die Noten am Klavier');
+  } catch (err) {
+    mic.stop();
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    showToast(denied ? 'Mikrofon nicht erlaubt. Bitte in den Einstellungen freigeben.' : 'Mikrofon ist hier nicht verfügbar.');
+  } finally {
+    ui.micBtn.disabled = false;
+    syncMic();
+  }
+}
+
+function stopMic() {
+  mic.stop();
+  syncMic();
+}
+
+function syncMic() {
+  ui.micBtn.setAttribute('aria-pressed', String(mic.active));
+  ui.micBtn.setAttribute('aria-label', mic.active ? 'Mikrofon ist an – ausschalten' : 'Mikrofon: am echten Klavier antworten');
+  if (!locked && document.body.dataset.view === 'play') showFeedback(null);
 }
 
 function answer(tapped) {
   locked = true;
-  if (settings.sound) piano.play(frequency(tapped));
+  // im Mikrofon-Modus kein eigener Ton – sonst hört sich die App selbst
+  if (settings.sound && !mic.active) piano.play(frequency(tapped));
   const result = trainer.answer(tapped, performance.now() - shownAt);
   marks = { [tapped]: result.correct ? 'right' : 'wrong' };
   if (!result.correct) marks[result.item.note] = 'right';
   drawKeyboard();
-  showFeedback(result);
+  showFeedback(result, tapped);
   const { answered, total } = trainer.progress;
   ui.progress.style.width = `${(answered / total) * 100}%`;
   if (result.unlocked.length) showToast(`Neu dazu: ${noteList(result.unlocked)}`);
@@ -252,12 +307,13 @@ ui.sound.addEventListener('click', () => {
 });
 
 ui.again.addEventListener('click', startRound);
+ui.micBtn.addEventListener('click', () => (mic.active ? stopMic() : startMic()));
 ui.overviewBtn.addEventListener('click', () => (document.body.dataset.view === 'overview' ? closeOverview() : showOverview()));
 ui.overviewBack.addEventListener('click', closeOverview);
 
 // Ton erst nach einer Nutzeraktion freischalten (Vorgabe der Handy-Browser)
 for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {
-  document.addEventListener(type, () => settings.sound && piano.unlock(), { capture: true, passive: true });
+  document.addEventListener(type, () => settings.sound && !mic.active && piano.unlock(), { capture: true, passive: true });
 }
 
 // Zeit, in der die App im Hintergrund war, zählt nicht als Antwortzeit

@@ -70,7 +70,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-areas: "mode sound table" "level count stats";
+  grid-template-areas: "mode sound table" "level mic stats";
   gap: 8px 8px;
   align-items: center;
   padding: 10px 12px 8px;
@@ -81,7 +81,9 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 #overview-btn { grid-area: stats; }
 #table-btn { grid-area: table; color: inherit; }
 .icon-btn .book { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
-.count { justify-self: center; }
+#mic-btn { grid-area: mic; }
+.icon-btn .mic { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+#mic-btn[aria-pressed="true"] { background: var(--wrong); color: #fff; }
 .secondary {
   display: inline-block;
   margin: 4px 0 6px;
@@ -94,7 +96,8 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 }
 .icon-btn .bars { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; }
 body[data-view="overview"] #overview-btn { background: var(--accent); color: var(--accent-text); }
-.count { grid-area: count; justify-self: end; color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
+.progress-row { display: flex; align-items: center; gap: 8px; margin: 0 12px; }
+.count { flex: 0 0 auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .count b { color: var(--text); }
 
 .seg {
@@ -137,7 +140,7 @@ body[data-view="overview"] #overview-btn { background: var(--accent); color: var
 #sound[aria-pressed="false"] .waves { display: none; }
 #sound[aria-pressed="false"] { color: var(--muted); }
 
-.progress { height: 4px; margin: 0 12px; border-radius: 2px; background: var(--seg); overflow: hidden; }
+.progress { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--seg); overflow: hidden; }
 .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s ease; }
 
 /* --- Notensystem und Rückmeldung --- */
@@ -175,7 +178,7 @@ main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
 .feedback {
   flex: 0 0 auto;
-  height: 56px;
+  height: 64px;
   margin: 0;
   display: flex;
   align-items: center;
@@ -358,7 +361,7 @@ body[data-view="overview"] .keys { display: none; }
 @media (orientation: landscape) and (max-height: 540px) {
   .bar {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto auto auto;
-    grid-template-areas: "mode level count sound table stats";
+    grid-template-areas: "mode level sound table mic stats";
     padding: 6px 12px;
   }
   .level { justify-self: stretch; }
@@ -371,4 +374,14 @@ body[data-view="overview"] .keys { display: none; }
   .feedback .name { font-size: 30px; }
   .feedback .hint { text-align: center; }
   .keys { height: 40dvh; }
+}
+
+/* --- Mikrofon-Modus und „gespielt: …“ in der Rückmeldung --- */
+.feedback { flex-wrap: wrap; row-gap: 2px; }
+.feedback .played { flex-basis: 100%; text-align: center; color: var(--wrong); font-size: 14px; font-weight: 600; }
+.feedback .listen { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 16px; }
+.mic-level { width: 56px; height: 8px; border-radius: 4px; background: var(--seg); overflow: hidden; }
+.mic-level i { display: block; height: 100%; width: 0; background: var(--right); transition: width 0.06s linear; }
+@media (orientation: landscape) and (max-height: 540px) {
+  .feedback .listen { flex-direction: column; text-align: center; }
 }
