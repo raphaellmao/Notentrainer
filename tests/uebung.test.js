@@ -257,3 +257,68 @@ test('Übersicht: Status, Quote, Zeit und Sperre je Note', () => {
   assert.equal(ov.find((o) => o.note === 'D4').locked, true);
   assert.equal(ov.find((o) => o.note === 'D4').status, 'neu');
 });
+
+// --- Stufe 3: Notenfolgen ---
+
+import { pickSequence, SEQUENCE_LENGTH } from '../js/trainer.js';
+import { diatonicIndex } from '../js/notes.js';
+
+test('Folgen: 5 Noten, ein Schlüssel, kleine Schritte, nie dieselbe Note hintereinander', () => {
+  for (const mode of ['treble', 'bass', 'mixed']) {
+    const pool = buildPool(mode, 'folgen');
+    assert.equal(pool.length, mode === 'mixed' ? 30 : 15, 'voller Vorrat von Stufe 2');
+    const rng = seeded(31);
+    let prev = null;
+    for (let k = 0; k < 400; k++) {
+      const seq = pickSequence(pool, {}, prev, SEQUENCE_LENGTH, rng);
+      assert.equal(seq.length, 5);
+      assert.equal(new Set(seq.map((it) => it.clef)).size, 1, 'ein Schlüssel pro Folge');
+      for (let i = 0; i < seq.length; i++) {
+        assert.ok(pool.some((p) => p.clef === seq[i].clef && p.note === seq[i].note), 'aus dem Vorrat');
+        const before = i === 0 ? prev : seq[i - 1];
+        if (before) assert.notEqual(seq[i].note, before.note, 'nie zweimal hintereinander (auch über Folgen hinweg)');
+        if (i > 0) assert.ok(Math.abs(diatonicIndex(seq[i].note) - diatonicIndex(seq[i - 1].note)) <= 4, 'höchstens eine Quinte');
+      }
+      prev = seq[seq.length - 1];
+    }
+  }
+});
+
+test('Folgen: schwache Noten kommen häufiger vor', () => {
+  const pool = buildPool('treble', 'folgen');
+  const stats = practiced(pool);
+  const hard = pool.find((it) => it.note === 'E5');
+  for (let i = 0; i < 3; i++) recordAnswer(stats, hard, false, 1500);
+  const rng = seeded(8);
+  const counts = new Map();
+  let prev = null;
+  for (let k = 0; k < 3000; k++) {
+    const seq = pickSequence(pool, stats, prev, 5, rng);
+    for (const it of seq) counts.set(it.note, (counts.get(it.note) || 0) + 1);
+    prev = seq[4];
+  }
+  const avg = [...counts.values()].reduce((a, b) => a + b, 0) / counts.size;
+  assert.ok(counts.get('E5') > 1.5 * avg, `e²: ${counts.get('E5')} vs. Schnitt ${avg.toFixed(0)}`);
+});
+
+test('Folgen: Runde mit 20 Noten = 4 Folgen, jede Note zählt einzeln', () => {
+  const trainer = new Trainer({ rng: seeded(12) });
+  trainer.configure('mixed', 'folgen');
+  assert.equal(trainer.isSequence, true);
+  let sequences = 0;
+  let res;
+  do {
+    const seq = trainer.nextSequence();
+    sequences++;
+    for (let i = 0; i < seq.length; i++) {
+      assert.equal(trainer.current, seq[i]);
+      res = trainer.answer(i === 2 ? 'C#4' : seq[i].note, 900);
+      trainer.advance();
+    }
+    assert.equal(trainer.current, null, 'nach der letzten Note ist die Folge zu Ende');
+  } while (!res.done);
+  assert.equal(sequences, 4);
+  const sum = trainer.summary();
+  assert.equal(sum.total, 20);
+  assert.equal(sum.correct, 16);
+});

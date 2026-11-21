@@ -52,6 +52,60 @@ export function staffLayout(clef, note) {
   };
 }
 
+// --- Notenfolge: mehrere Noten nebeneinander (Stufe 3) ---
+
+export const SEQUENCE = {
+  clefArea: 40, // Platz für den Schlüssel
+  gap: 26, // Abstand der Notenmitten
+  right: 8,
+  ledgerHalf: 11, // kürzer als bei Einzelnoten, damit sich Nachbar-Hilfslinien nicht berühren
+};
+
+export const sequenceWidth = (count) => SEQUENCE.clefArea + count * SEQUENCE.gap + SEQUENCE.right;
+
+export function sequenceLayout(clef, notes) {
+  return {
+    clef,
+    width: sequenceWidth(notes.length),
+    lineYs: [0, 2, 4, 6, 8].map(stepY),
+    clefY: stepY(CLEFS[clef].anchorStep),
+    notes: notes.map((note, i) => {
+      const step = staffStep(clef, note);
+      return { note, step, x: SEQUENCE.clefArea + SEQUENCE.gap * (i + 0.5), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY) };
+    }),
+  };
+}
+
+// states[i]: 'right' | 'wrong' | undefined; current: Index der Note, die als Nächstes dran ist
+export function renderSequence(clef, notes, { states = [], current = -1, label = 'Notenfolge' } = {}) {
+  const g = GEOMETRY;
+  const L = sequenceLayout(clef, notes);
+  const lines = L.lineYs.map((y) => `<line class="staff-line" x1="${g.lineLeft}" y1="${y}" x2="${L.width - 4}" y2="${y}"/>`).join('');
+  const cursor = L.notes[current]
+    ? `<rect class="cursor" x="${L.notes[current].x - SEQUENCE.gap / 2 + 1}" y="3" width="${SEQUENCE.gap - 2}" height="${g.height - 6}" rx="5"/>`
+    : '';
+  const ledgers = L.notes
+    .flatMap((n, i) =>
+      n.ledgerYs.map((y) => `<line class="ledger-line" data-index="${i}" x1="${n.x - SEQUENCE.ledgerHalf}" y1="${y}" x2="${n.x + SEQUENCE.ledgerHalf}" y2="${y}"/>`),
+    )
+    .join('');
+  const heads = L.notes
+    .map(
+      (n, i) =>
+        `<g class="note${states[i] ? ` ${states[i]}` : ''}" data-note="${n.note}" data-index="${i}" transform="translate(${n.x} ${n.y})" fill="currentColor"><path fill-rule="evenodd" d="${WHOLE_NOTE}"/></g>`,
+    )
+    .join('');
+  return (
+    `<svg class="staff seq" viewBox="0 0 ${L.width} ${g.height}" style="--seq-ratio: ${L.width / g.height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}">` +
+    cursor +
+    `<g class="staff-lines" stroke="currentColor" stroke-width="${g.lineWidth}">${lines}</g>` +
+    `<g class="clef" data-clef="${clef}" transform="translate(${g.clefX} ${L.clefY}) scale(${SPACE})" fill="currentColor">${CLEF_SHAPES[clef]}</g>` +
+    `<g class="ledger-lines" stroke="currentColor" stroke-width="${g.ledgerWidth}">${ledgers}</g>` +
+    heads +
+    `</svg>`
+  );
+}
+
 export function renderStaff(clef, note, { label = 'Notensystem mit einer Note' } = {}) {
   const g = GEOMETRY;
   const L = staffLayout(clef, note);

@@ -2,7 +2,7 @@
 
 import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote } from './notes.js';
 import { Microphone } from './mic.js';
-import { renderStaff } from './staff.js';
+import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
 import { Trainer, noteOverview } from './trainer.js';
 import { Piano } from './audio.js';
@@ -10,6 +10,7 @@ import { Piano } from './audio.js';
 const SETTINGS_KEY = 'notentrainer.einstellungen.v1';
 const DELAY_RIGHT = 600; // ms bis zur nächsten Note nach richtiger Antwort
 const DELAY_WRONG = 1500; // … nach falscher Antwort
+const SEQ_DELAY_RIGHT = 300; // in Notenfolgen: nach richtiger Note gleich zur nächsten
 
 const storage = (() => {
   try {
@@ -47,8 +48,8 @@ const ui = {
   micBtn: $('#mic-btn'),
 };
 
-const LEVELS = ['aufbau', 1, 2];
-const parseLevel = (value) => (value === 'aufbau' ? 'aufbau' : Number(value));
+const LEVELS = ['aufbau', 1, 2, 'folgen'];
+const parseLevel = (value) => (value === 'aufbau' || value === 'folgen' ? value : Number(value));
 const STATUS_TEXT = { sitzt: 'sitzt', wackelt: 'wackelt', ueben: 'üben', neu: 'noch nicht geübt' };
 const seconds = (ms) => (ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -144,12 +145,47 @@ function startRound() {
   clearTimeout(timer);
   trainer.configure(settings.mode, settings.level);
   setView('play');
-  nextNote();
+  if (trainer.isSequence) nextSequence();
+  else nextNote();
 }
 
 function nextNote() {
   const item = trainer.next();
   ui.staff.innerHTML = renderStaff(item.clef, item.note, { label: `Note im ${CLEFS[item.clef].name}` });
+  ready();
+}
+
+// --- Stufe 3: Notenfolgen ---
+
+let seqStates = []; // je Note der Folge: 'right' | 'wrong' | undefined
+
+function nextSequence() {
+  trainer.nextSequence();
+  seqStates = [];
+  drawSequence(trainer.position);
+  ready();
+}
+
+function drawSequence(current) {
+  const seq = trainer.sequence;
+  ui.staff.innerHTML = renderSequence(seq[0].clef, seq.map((it) => it.note), {
+    states: seqStates,
+    current,
+    label: `Notenfolge im ${CLEFS[seq[0].clef].name}`,
+  });
+}
+
+// nach einer Antwort in der Folge: weiter zur nächsten Note, zur nächsten Folge oder zur Auswertung
+function continueSequence(done) {
+  if (done) return showSummary();
+  if (trainer.advance()) {
+    drawSequence(trainer.position);
+    ready();
+  } else nextSequence();
+}
+
+// Aufgabe steht: Tasten zurücksetzen, Zähler aktualisieren, Eingabe freigeben
+function ready() {
   marks = {};
   drawKeyboard();
   showFeedback(null);
@@ -177,7 +213,8 @@ function showFeedback(result, tapped) {
         '<span class="listen"><span class="listen-text">Spiel die Note am Klavier</span>' +
         '<span class="mic-level"><i></i></span><span class="heard"></span></span>';
     } else {
-      ui.feedback.innerHTML = trainer.progress.answered === 0 ? '<span class="hint">Tippe die passende Taste.</span>' : '';
+      const hint = trainer.isSequence ? 'Spiel die Noten von links nach rechts.' : 'Tippe die passende Taste.';
+      ui.feedback.innerHTML = trainer.progress.answered === 0 ? `<span class="hint">${hint}</span>` : '';
     }
     return;
   }
@@ -265,6 +302,15 @@ function answer(tapped) {
   const { answered, total } = trainer.progress;
   ui.progress.style.width = `${(answered / total) * 100}%`;
   if (result.unlocked.length) showToast(`Neu dazu: ${noteList(result.unlocked)}`);
+  if (trainer.isSequence) {
+    seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
+    drawSequence(trainer.position);
+    const lastOfSequence = trainer.position === trainer.sequence.length - 1;
+    // im Fluss lesen: nach richtiger Note gleich weiter, am Ende der Folge kurz das Ergebnis zeigen
+    const delay = !result.correct ? DELAY_WRONG : lastOfSequence ? DELAY_RIGHT + 300 : SEQ_DELAY_RIGHT;
+    timer = setTimeout(() => continueSequence(result.done), delay);
+    return;
+  }
   timer = setTimeout(result.done ? showSummary : nextNote, result.correct ? DELAY_RIGHT : DELAY_WRONG);
 }
 

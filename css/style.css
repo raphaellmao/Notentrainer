@@ -360,7 +360,7 @@ body[data-view="overview"] .keys { display: none; }
 
 @media (orientation: landscape) and (max-height: 540px) {
   .bar {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto auto auto;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.25fr) auto auto auto auto;
     grid-template-areas: "mode level sound table mic stats";
     padding: 6px 12px;
   }
@@ -386,3 +386,25 @@ body[data-view="overview"] .keys { display: none; }
   .feedback .listen { flex-direction: column; text-align: center; }
 }
 .feedback .heard { min-width: 64px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- Stufe 3: Notenfolgen --- */
+.paper svg.seq {
+  aspect-ratio: var(--seq-ratio);
+  width: min(100cqw, calc(100cqh * var(--seq-ratio)), 820px);
+}
+.staff .cursor { fill: var(--accent); opacity: 0.14; }
+.staff .note.right { color: var(--right); }
+.staff .note.wrong { color: var(--wrong); }
+@media (orientation: landscape) and (max-height: 540px) {
+  .paper:has(svg.seq) { max-width: none; }
+}
+/* vier Stufen-Knöpfe: auf normalen Handys etwas enger setzen */
+@media (max-width: 430px) {
+  .level button { padding: 0 6px; font-size: 14px; }
+}
+@media (max-width: 360px) {
+  .level button { padding: 0 3px; font-size: 13px; }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .level button, .mode button { padding: 0 6px; font-size: 14px; }
+}

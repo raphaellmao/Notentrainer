@@ -1,7 +1,7 @@
 // Übungslogik: Notenvorrat, adaptive Auswahl, Statistik pro Note, Runden, Aufbau mit Leitnoten.
 // Ohne DOM; Speicher (localStorage) und Zufall werden hereingereicht.
 
-import { levelNotes } from './notes.js';
+import { levelNotes, diatonicIndex } from './notes.js';
 
 export const ROUND_LENGTH = 20;
 export const STATS_KEY = 'notentrainer.statistik.v1';
@@ -26,13 +26,33 @@ const AUFBAU_STEP = 2;
 
 export const itemKey = (item) => `${item.clef}:${item.note}`;
 
-// mode: 'treble' | 'bass' | 'mixed', level: 1 | 2 | 'aufbau'
+// Stufe 3 („folgen“): Notenfolgen aus dem vollen Vorrat von Stufe 2
+export const SEQUENCE_LENGTH = 5;
+const MAX_STEP = 4; // größter Schritt innerhalb einer Folge: Quinte (4 Stammton-Schritte)
+
+// mode: 'treble' | 'bass' | 'mixed', level: 1 | 2 | 'aufbau' | 'folgen'
 // unlocked: im Aufbau freigeschaltete Anzahl je Schlüssel
 export function buildPool(mode, level, unlocked = {}) {
   const clefs = mode === 'mixed' ? ['treble', 'bass'] : [mode];
-  const notes = (clef) =>
-    level === 'aufbau' ? AUFBAU_ORDER[clef].slice(0, unlocked[clef] ?? AUFBAU_START) : levelNotes(clef, level);
+  const notes = (clef) => {
+    if (level === 'aufbau') return AUFBAU_ORDER[clef].slice(0, unlocked[clef] ?? AUFBAU_START);
+    return levelNotes(clef, level === 'folgen' ? 2 : level);
+  };
   return clefs.flatMap((clef) => notes(clef).map((note) => ({ clef, note })));
+}
+
+// Eine Notenfolge wie eine kleine Melodie: alles in einem Schlüssel, kleine Schritte
+// (höchstens eine Quinte), nie dieselbe Note zweimal hintereinander, schwache Noten bevorzugt.
+export function pickSequence(pool, stats, previous, length = SEQUENCE_LENGTH, rng = Math.random) {
+  const first = pickNext(pool, stats, previous, rng);
+  const clefPool = pool.filter((it) => it.clef === first.clef);
+  const seq = [first];
+  while (seq.length < length) {
+    const last = seq[seq.length - 1];
+    const near = clefPool.filter((it) => Math.abs(diatonicIndex(it.note) - diatonicIndex(last.note)) <= MAX_STEP);
+    seq.push(pickNext(near.length > 1 ? near : clefPool, stats, last, rng));
+  }
+  return seq;
 }
 
 // Wie gut sitzt eine Note? 'neu' | 'sitzt' | 'wackelt' | 'ueben'
@@ -172,11 +192,34 @@ export class Trainer {
   startRound() {
     this.answers = [];
     this.current = null;
+    this.sequence = null;
+    this.position = 0;
+  }
+
+  get isSequence() {
+    return this.level === 'folgen';
   }
 
   next() {
     this.current = pickNext(this.pool, this.stats, this.previous, this.rng);
     this.previous = this.current;
+    return this.current;
+  }
+
+  // Stufe 3: neue Folge (kürzer, falls die Runde sonst überläuft); current = erste Note
+  nextSequence() {
+    const length = Math.min(SEQUENCE_LENGTH, this.roundLength - this.answers.length);
+    this.sequence = pickSequence(this.pool, this.stats, this.previous, length, this.rng);
+    this.position = 0;
+    this.current = this.sequence[0];
+    this.previous = this.sequence[length - 1];
+    return this.sequence;
+  }
+
+  // Stufe 3: zur nächsten Note der Folge; null, wenn die Folge zu Ende ist
+  advance() {
+    this.position += 1;
+    this.current = this.sequence?.[this.position] ?? null;
     return this.current;
   }
 

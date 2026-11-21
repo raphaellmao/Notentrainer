@@ -10,7 +10,8 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
   **Stufe 2:** mit Hilfslinien (Violin c¹–c³, Bass C–c¹).
 - **Klaviatur:** immer zwei Oktaven, Violin c¹–c³, Bass C–c¹. Der graue Punkt markiert das mittlere C (c¹).
   Schwarze Tasten zählen als falsch, denn es kommen nur Stammtöne vor.
-- **Runde:** 20 Noten, danach Trefferquote, Durchschnittszeit und die falschen Noten.
+- **Stufe 3 (Notenfolgen):** fünf Noten nebeneinander wie eine kleine Melodie (Schritte bis zur Quinte), der Reihe nach spielen; Notenvorrat wie Stufe 2.
+- **Runde:** 20 Noten (in Stufe 3: 4 Folgen), danach Trefferquote, Durchschnittszeit und die falschen Noten.
 - **Adaptiv:** Pro Note werden Versuche, Fehler und Antwortzeit im Browser gespeichert (localStorage).
   Noten, die oft falsch oder langsam kommen, erscheinen häufiger. Dieselbe Note kommt nie zweimal hintereinander.
 

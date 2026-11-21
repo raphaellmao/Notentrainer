@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CLEFS, levelNotes, helmholtzName, isNatural } from '../js/notes.js';
-import { renderStaff } from '../js/staff.js';
+import { renderStaff, renderSequence } from '../js/staff.js';
 import { keyboardLayout, keyAt, keyForNote, renderKeyboard } from '../js/keyboard.js';
 
 // [Note, deutscher Name, Position]
@@ -220,3 +220,47 @@ test('Klaviaturbereiche: Violin c¹–c³, Bass C–c¹ (unabhängig von der Stu
     }
   }
 });
+
+// --- Stufe 3: Notenfolgen – jede Note in der Folge sitzt genauso richtig wie einzeln ---
+
+function parseSequence(svg) {
+  const lines = (cls, extra = '') =>
+    [...svg.matchAll(new RegExp(`<line class="${cls}"${extra} x1="${NUM}" y1="${NUM}" x2="${NUM}" y2="${NUM}"/>`, 'g'))];
+  const staff = lines('staff-line').map((m) => +m[2]);
+  const ledgers = lines('ledger-line', ' data-index="([0-9]+)"').map((m) => ({ i: +m[1], x1: +m[2], y: +m[3], x2: +m[4] }));
+  const notes = [...svg.matchAll(new RegExp(`<g class="note[^"]*" data-note="([^"]+)" data-index="([0-9]+)" transform="translate[(]${NUM} ${NUM}[)]"`, 'g'))].map(
+    (m) => ({ note: m[1], i: +m[2], x: +m[3], y: +m[4] }),
+  );
+  return { staff, ledgers, notes };
+}
+
+for (const clef of ['treble', 'bass']) {
+  test(`${CLEFS[clef].name}: in Notenfolgen sitzt jede Note an der richtigen Stelle`, () => {
+    const ref = REFERENCE[clef];
+    // alle 15 Noten in Folgen zu je 5, einmal vorwärts und einmal gemischt
+    const orders = [ref, [...ref].reverse(), ref.filter((_, i) => i % 2).concat(ref.filter((_, i) => !(i % 2)))];
+    for (const order of orders) {
+      for (let k = 0; k < order.length; k += 5) {
+        const chunk = order.slice(k, k + 5);
+        const s = parseSequence(renderSequence(clef, chunk.map(([n]) => n)));
+        assert.equal(s.staff.length, 5);
+        const L = [...s.staff].sort((a, b) => b - a);
+        const d = L[0] - L[1];
+        assert.equal(s.notes.length, chunk.length);
+        chunk.forEach(([note, name, desc], i) => {
+          const n = s.notes.find((x) => x.i === i);
+          assert.equal(n.note, note);
+          const exp = expected(desc, L, d);
+          close(n.y, exp.y, `Folge: ${name} („${desc}“) Höhe`);
+          const mine = s.ledgers.filter((l) => l.i === i);
+          assert.equal(mine.length, exp.ledgers.length, `Folge: ${name} Anzahl Hilfslinien`);
+          sortNum(mine.map((l) => l.y)).forEach((y, j) => close(y, sortNum(exp.ledgers)[j], `Folge: ${name} Hilfslinie`));
+          for (const l of mine) close((l.x1 + l.x2) / 2, n.x, `Folge: ${name} Hilfslinie mittig`);
+          if (i > 0) assert.ok(n.x > s.notes.find((x) => x.i === i - 1).x, 'Noten von links nach rechts');
+        });
+        // Hilfslinien benachbarter Noten berühren sich nicht
+        for (const a of s.ledgers) for (const b of s.ledgers) if (a.i + 1 === b.i) assert.ok(a.x2 < b.x1, 'Hilfslinien überlappen nicht');
+      }
+    }
+  });
+}
