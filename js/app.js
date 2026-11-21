@@ -173,7 +173,9 @@ function showFeedback(result, tapped) {
   if (!result) {
     ui.feedback.className = 'feedback';
     if (mic.active) {
-      ui.feedback.innerHTML = '<span class="listen">Spiel die Note am Klavier <span class="mic-level"><i></i></span></span>';
+      ui.feedback.innerHTML =
+        '<span class="listen"><span class="listen-text">Spiel die Note am Klavier</span>' +
+        '<span class="mic-level"><i></i></span><span class="heard"></span></span>';
     } else {
       ui.feedback.innerHTML = trainer.progress.answered === 0 ? '<span class="hint">Tippe die passende Taste.</span>' : '';
     }
@@ -199,9 +201,21 @@ const mic = new Microphone({
     if (locked || !trainer.current || document.body.dataset.view !== 'play') return;
     answer(noteFromMidi(midi));
   },
-  onLevel: (level) => {
+  // Pegel + live gehörte Note anzeigen; nach 8 s Stille einen Hinweis geben
+  onLevel: (level, heardMidi) => {
+    const now = performance.now();
+    if (heardMidi !== null) {
+      lastHeard = { midi: heardMidi, at: now };
+      lastSoundAt = now;
+    }
     const bar = ui.feedback.querySelector('.mic-level i');
-    if (bar) bar.style.width = `${Math.min(100, Math.sqrt(level) * 350)}%`;
+    if (!bar) return;
+    bar.style.width = `${Math.min(100, Math.sqrt(level) * 350)}%`;
+    const heard = ui.feedback.querySelector('.heard');
+    const showHeard = lastHeard && now - lastHeard.at < 500;
+    heard.textContent = showHeard ? `höre: ${helmholtzName(noteFromMidi(lastHeard.midi))}` : '';
+    ui.feedback.querySelector('.listen-text').textContent =
+      now - lastSoundAt > 8000 ? 'Ich höre nichts – Handy näher ans Klavier?' : 'Spiel die Note am Klavier';
   },
   onEnded: () => {
     stopMic();
@@ -209,10 +223,14 @@ const mic = new Microphone({
   },
 });
 
+let lastHeard = null;
+let lastSoundAt = 0;
+
 async function startMic() {
   ui.micBtn.disabled = true;
   try {
     await mic.start();
+    lastSoundAt = performance.now();
     showToast('Mikrofon an – spiel die Noten am Klavier');
   } catch (err) {
     mic.stop();
@@ -318,7 +336,12 @@ for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {
 
 // Zeit, in der die App im Hintergrund war, zählt nicht als Antwortzeit
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !locked) shownAt = performance.now();
+  if (document.visibilityState !== 'visible') return;
+  if (!locked) shownAt = performance.now();
+  if (mic.active) {
+    mic.resume(); // Mikrofon läuft nach dem Hintergrund weiter (oder meldet sich über onEnded ab)
+    lastSoundAt = performance.now();
+  }
 });
 
 new ResizeObserver(() => drawKeyboard()).observe(ui.keyboard);

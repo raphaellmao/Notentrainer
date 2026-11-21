@@ -385,3 +385,4 @@ body[data-view="overview"] .keys { display: none; }
 @media (orientation: landscape) and (max-height: 540px) {
   .feedback .listen { flex-direction: column; text-align: center; }
 }
+.feedback .heard { min-width: 64px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }

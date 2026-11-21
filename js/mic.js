@@ -53,11 +53,22 @@ export class Microphone {
     if (now - this.last < EVERY_MS) return;
     this.last = now;
     this.analyser.getFloatTimeDomainData(this.buf);
-    const { rms, midi } = analyseFrame(this.buf, this.ctx.sampleRate);
-    this.onLevel?.(rms);
-    const note = this.listener.feed(rms, midi, now);
+    const frame = analyseFrame(this.buf, this.ctx.sampleRate);
+    const { rms, hf, midi } = frame;
+    // midi nur melden, wenn deutlich lauter als das Grundrauschen (für die Anzeige „höre: …“)
+    const heard = midi !== null && rms > Math.max(this.listener.minRms, (this.listener.floor ?? 0) * 3) ? midi : null;
+    this.onLevel?.(rms, heard);
+    const note = this.listener.feed(rms, midi, now, hf, frame);
     if (note !== null) this.onNote(note);
   };
+
+  // Nach dem Zurückkehren aus dem Hintergrund weiterlauschen
+  resume() {
+    if (!this.stream) return;
+    if (this.ctx && this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    cancelAnimationFrame(this.raf);
+    this.tick();
+  }
 
   stop() {
     cancelAnimationFrame(this.raf);

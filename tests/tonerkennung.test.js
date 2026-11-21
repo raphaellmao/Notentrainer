@@ -106,9 +106,10 @@ function simulate(hits, seconds, { noiseLevel = 0.003 } = {}) {
   const listener = new NoteListener();
   const heard = [];
   for (let end = FRAME; end <= total; end += HOP) {
-    const { rms, midi } = analyseFrame(signal.subarray(end - FRAME, end), RATE);
+    const frame = analyseFrame(signal.subarray(end - FRAME, end), RATE);
+    const { rms, hf, midi } = frame;
     const t = (end / RATE) * 1000;
-    const got = listener.feed(rms, midi, t);
+    const got = listener.feed(rms, midi, t, hf, frame);
     if (got !== null) heard.push({ t: Math.round(t), note: noteFromMidi(got) });
   }
   return heard;
