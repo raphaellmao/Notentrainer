@@ -34,12 +34,16 @@
     <a class="icon-btn" id="table-btn" href="notentabelle.html" aria-label="Alle Noten mit Namen (Lösung)" title="Alle Noten mit Namen">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path class="book" d="M4 5.5c2.6-1 5.3-1 8 .8 2.7-1.8 5.4-1.8 8-.8v13c-2.6-1-5.3-1-8 .8-2.7-1.8-5.4-1.8-8-.8zM12 6.3v13.3"/></svg>
     </a>
-    <div class="seg level" role="radiogroup" aria-label="Stufe">
-      <button type="button" role="radio" data-level="aufbau" aria-checked="false" title="mit Leitnoten beginnen, weitere Noten kommen dazu">Aufbau</button>
-      <button type="button" role="radio" data-level="1" aria-checked="true" title="nur Noten ohne Hilfslinien">Stufe 1</button>
-      <button type="button" role="radio" data-level="2" aria-checked="false" title="mit Hilfslinien">Stufe 2</button>
-      <button type="button" role="radio" data-level="folgen" aria-checked="false" title="Notenfolgen: fünf Noten nacheinander lesen">Stufe 3</button>
-    </div>
+    <label class="level-select level">
+      <span class="sr-only">Stufe</span>
+      <select id="level" aria-label="Stufe">
+        <option value="aufbau">Aufbau · Leitnoten</option>
+        <option value="1">Stufe 1 · ohne Hilfslinien</option>
+        <option value="2">Stufe 2 · mit Hilfslinien</option>
+        <option value="folgen">Stufe 3 · Notenfolgen</option>
+        <option value="lieder">Stufe 4 · Lieder</option>
+      </select>
+    </label>
     <button type="button" class="icon-btn" id="mic-btn" aria-pressed="false" aria-label="Mikrofon: am echten Klavier antworten">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path class="mic" d="M12 3.5a2.8 2.8 0 0 0-2.8 2.8v5.4a2.8 2.8 0 0 0 5.6 0V6.3A2.8 2.8 0 0 0 12 3.5zM6.5 11.2a5.5 5.5 0 0 0 11 0M12 16.7V20.5M8.8 20.5h6.4"/></svg>
     </button>
@@ -54,6 +58,12 @@
 
   <main>
     <section class="stage" aria-label="Übung">
+      <div class="songbar" id="songbar" hidden>
+        <button type="button" class="link-btn" id="song-list-btn">‹ Lieder</button>
+        <b id="song-title"></b>
+        <span class="song-line" id="song-line"></span>
+        <button type="button" class="link-btn" id="song-listen">▶ Anhören</button>
+      </div>
       <div class="paper" id="staff"></div>
       <p class="feedback" id="feedback" aria-live="polite"></p>
     </section>
@@ -69,6 +79,31 @@
       <p class="all-right" id="sum-all-right" hidden>Alles richtig – stark!</p>
       <p class="unlocked" id="sum-unlocked" hidden></p>
       <button type="button" class="primary" id="again">Nochmal</button>
+      <button type="button" class="secondary" id="other-song" hidden>Anderes Lied</button>
+    </section>
+
+    <section class="songs" aria-labelledby="songs-title">
+      <h2 id="songs-title">Lieder</h2>
+      <p class="songs-help">Ganze Lieder Note für Note spielen. Alle Melodien sind gemeinfrei und stehen im Violinschlüssel (rechte Hand). Der Rhythmus wird angezeigt; gewertet wird, ob du die richtigen Tasten triffst.</p>
+      <div class="song-list" id="song-list"></div>
+    </section>
+
+    <section class="tune" aria-labelledby="tune-title">
+      <h2 id="tune-title">Klavier einmessen</h2>
+      <p class="tune-help">Spiel nacheinander <b>mindestens 5 verschiedene weiße Tasten</b> in der Mitte, zum Beispiel c¹ d¹ e¹ f¹ g¹ – jede einzeln und kräftig, dann kurz warten. Die App misst dabei, wie hoch dein Klavier gestimmt ist, und rechnet das bei der Erkennung heraus.</p>
+      <div class="tuner" aria-live="off">
+        <div class="tuner-note" id="tuner-note">–</div>
+        <div class="tuner-scale" aria-hidden="true"><span class="mark"></span><i id="tuner-needle"></i></div>
+        <div class="tuner-cents" id="tuner-cents">&nbsp;</div>
+      </div>
+      <p class="tune-count" id="tune-count"></p>
+      <div class="tune-result" id="tune-result" aria-live="polite" hidden></div>
+      <button type="button" class="primary" id="tune-save" disabled>Übernehmen</button>
+      <div class="tune-actions">
+        <button type="button" class="secondary" id="tune-reset">Auf 440 Hz zurücksetzen</button>
+        <button type="button" class="secondary" id="tune-cancel">Abbrechen</button>
+      </div>
+      <p class="note-small" id="tune-current"></p>
     </section>
 
     <section class="overview" aria-labelledby="overview-title">

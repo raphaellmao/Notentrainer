@@ -20,7 +20,7 @@ export const GEOMETRY = {
 };
 
 // Ganze Note um (0|0): ovaler Kopf mit schräger Öffnung
-const WHOLE_NOTE = (() => {
+export const WHOLE_NOTE = (() => {
   const rx = 8.2;
   const ry = 5.4;
   const hrx = 4.0;

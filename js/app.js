@@ -1,7 +1,10 @@
 // App: verbindet Notendarstellung, Klaviatur, Übungslogik und Klang mit der Oberfläche.
 
-import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote } from './notes.js';
+import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote, midiNumber } from './notes.js';
 import { Microphone } from './mic.js';
+import { SONGS } from './songs.js';
+import { layoutScore, renderScoreLine, parseMelody } from './score.js';
+import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
 import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
 import { Trainer, noteOverview } from './trainer.js';
@@ -46,10 +49,15 @@ const ui = {
   overviewBack: $('#overview-back'),
   toast: $('#toast'),
   micBtn: $('#mic-btn'),
+  songbar: $('#songbar'),
+  songTitle: $('#song-title'),
+  songLine: $('#song-line'),
+  songList: $('#song-list'),
+  otherSong: $('#other-song'),
 };
 
-const LEVELS = ['aufbau', 1, 2, 'folgen'];
-const parseLevel = (value) => (value === 'aufbau' || value === 'folgen' ? value : Number(value));
+const LEVELS = ['aufbau', 1, 2, 'folgen', 'lieder'];
+const parseLevel = (value) => (['aufbau', 'folgen', 'lieder'].includes(value) ? value : Number(value));
 const STATUS_TEXT = { sitzt: 'sitzt', wackelt: 'wackelt', ueben: 'üben', neu: 'noch nicht geübt' };
 const seconds = (ms) => (ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -62,13 +70,16 @@ let toastTimer = 0;
 let viewBeforeOverview = 'play';
 
 function loadSettings() {
-  const fallback = { mode: 'treble', level: 1, sound: true };
+  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null };
   try {
     const saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}');
     return {
       mode: ['treble', 'bass', 'mixed'].includes(saved.mode) ? saved.mode : fallback.mode,
       level: LEVELS.includes(saved.level) ? saved.level : fallback.level,
       sound: typeof saved.sound === 'boolean' ? saved.sound : fallback.sound,
+      // gemessene Stimmung des Klaviers; nur plausible Werte (etwa ±1 Halbton um 440 Hz)
+      refA: Number.isFinite(saved.refA) && saved.refA > 410 && saved.refA < 470 ? saved.refA : fallback.refA,
+      song: SONGS.some((x) => x.id === saved.song) ? saved.song : fallback.song,
     };
   } catch {
     return fallback;
@@ -85,14 +96,17 @@ function saveSettings() {
 
 function syncControls() {
   for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === settings.mode));
-  for (const b of document.querySelectorAll('[data-level]')) b.setAttribute('aria-checked', String(parseLevel(b.dataset.level) === settings.level));
+  $('#level').value = String(settings.level);
+  // Lieder stehen im Violinschlüssel – die Schlüsselwahl gilt dort nicht
+  document.querySelector('.mode').classList.toggle('inactive', settings.level === 'lieder');
   ui.sound.setAttribute('aria-pressed', String(settings.sound));
   ui.sound.setAttribute('aria-label', settings.sound ? 'Ton ist an – ausschalten' : 'Ton ist aus – einschalten');
 }
 
 // Während die Übersicht offen ist, merkt sich die App nur, wohin es danach zurückgeht.
+const OVERLAYS = ['overview', 'tune'];
 function setView(view) {
-  if (document.body.dataset.view === 'overview') viewBeforeOverview = view;
+  if (OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = view;
   else document.body.dataset.view = view;
 }
 
@@ -107,7 +121,7 @@ const noteList = (items) =>
   items.map((it) => (settings.mode === 'mixed' ? `${helmholtzName(it.note)} (${it.clef === 'treble' ? 'Violin' : 'Bass'})` : helmholtzName(it.note))).join(', ');
 
 function showOverview() {
-  if (document.body.dataset.view !== 'overview') viewBeforeOverview = document.body.dataset.view;
+  if (!OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = document.body.dataset.view;
   ui.overviewList.innerHTML = ['treble', 'bass']
     .map((clef) => {
       const items = noteOverview(clef, trainer.stats, trainer.unlocked[clef]);
@@ -144,9 +158,65 @@ function closeOverview() {
 function startRound() {
   clearTimeout(timer);
   trainer.configure(settings.mode, settings.level);
+  ui.songbar.hidden = settings.level !== 'lieder';
+  ui.otherSong.hidden = settings.level !== 'lieder';
+  if (settings.level === 'lieder') {
+    const song = SONGS.find((x) => x.id === settings.song);
+    if (!song) return showSongs();
+    return startSong(song);
+  }
   setView('play');
   if (trainer.isSequence) nextSequence();
   else nextNote();
+}
+
+// --- Stufe 4: Lieder ---
+
+let songLayout = null;
+let currentSong = null;
+let playbackUntil = 0; // während „Anhören“ zählt das Mikrofon nicht
+
+function showSongs() {
+  clearTimeout(timer);
+  ui.songList.innerHTML = SONGS.map((song) => {
+    const notes = parseMelody(song.melody).flat();
+    const range = [...notes].sort((a, b) => frequency(a.note) - frequency(b.note));
+    return (
+      `<button type="button" class="song-card" data-song="${song.id}"><b>${song.title}</b>` +
+      `<span>${song.origin}</span><span>${notes.length} Noten · ${helmholtzName(range[0].note)} bis ${helmholtzName(range[range.length - 1].note)} · ${song.time.join('/')}-Takt</span></button>`
+    );
+  }).join('');
+  ui.songbar.hidden = true;
+  setView('songs');
+}
+
+function startSong(song) {
+  currentSong = song;
+  songLayout = layoutScore(song);
+  trainer.startSong(parseMelody(song.melody).flat().map((n) => n.note));
+  seqStates = [];
+  ui.songTitle.textContent = song.title;
+  ui.songbar.hidden = false;
+  setView('play');
+  drawSequence(trainer.position);
+  ready();
+}
+
+// Melodie vorspielen (Tempo aus dem Lied, Viertel = 60/Tempo Sekunden)
+async function playSong() {
+  if (!currentSong) return;
+  piano.unlock();
+  if (piano.ctx && piano.ctx.state !== 'running') await piano.ctx.resume().catch(() => {});
+  if (!piano.ctx) return showToast('Dieser Browser kann keine Töne abspielen.');
+  if (piano.ctx.state !== 'running') return showToast('Ton ist noch nicht freigegeben – bitte nochmal tippen.');
+  const quarter = 60 / currentSong.tempo;
+  let t = 0.1;
+  for (const n of parseMelody(currentSong.melody).flat()) {
+    piano.voice(frequency(n.note), t);
+    t += n.beats * quarter;
+  }
+  playbackUntil = performance.now() + t * 1000 + 800;
+  if (mic.active) showToast('Beim Anhören wertet das Mikrofon nicht.');
 }
 
 function nextNote() {
@@ -168,6 +238,14 @@ function nextSequence() {
 
 function drawSequence(current) {
   const seq = trainer.sequence;
+  if (settings.level === 'lieder' && songLayout) {
+    // Zeile mit der aktuellen Note (am Ende die letzte Zeile)
+    const target = Math.min(current, seq.length - 1);
+    const li = Math.max(0, songLayout.lines.findIndex((l) => l.notes.some((n) => n.index === target)));
+    ui.songLine.textContent = `Zeile ${li + 1}/${songLayout.lines.length}`;
+    ui.staff.innerHTML = renderScoreLine(songLayout, li, { states: seqStates, current, label: `${currentSong.title}, Zeile ${li + 1}` });
+    return;
+  }
   ui.staff.innerHTML = renderSequence(seq[0].clef, seq.map((it) => it.note), {
     states: seqStates,
     current,
@@ -211,7 +289,8 @@ function showFeedback(result, tapped) {
     if (mic.active) {
       ui.feedback.innerHTML =
         '<span class="listen"><span class="listen-text">Spiel die Note am Klavier</span>' +
-        '<span class="mic-level"><i></i></span><span class="heard"></span></span>';
+        '<span class="mic-level"><i></i></span><span class="heard"></span>' +
+        '<button type="button" class="link-btn" data-action="tune">Einmessen</button></span>';
     } else {
       const hint = trainer.isSequence ? 'Spiel die Noten von links nach rechts.' : 'Tippe die passende Taste.';
       ui.feedback.innerHTML = trainer.progress.answered === 0 ? `<span class="hint">${hint}</span>` : '';
@@ -235,7 +314,7 @@ function showFeedback(result, tapped) {
 
 const mic = new Microphone({
   onNote: (midi) => {
-    if (locked || !trainer.current || document.body.dataset.view !== 'play') return;
+    if (locked || !trainer.current || document.body.dataset.view !== 'play' || performance.now() < playbackUntil) return;
     answer(noteFromMidi(midi));
   },
   // Pegel + live gehörte Note anzeigen; nach 8 s Stille einen Hinweis geben
@@ -258,17 +337,96 @@ const mic = new Microphone({
     stopMic();
     showToast('Mikrofon wurde beendet. Zum Weitermachen wieder antippen.');
   },
+  onFrame: (frame, note) => tuneFrame(frame, note),
 });
+mic.refA = settings.refA;
 
 let lastHeard = null;
 let lastSoundAt = 0;
+
+// --- Einmessen: Stimmung des Klaviers messen ---
+
+let tuneSession = null;
+let tuneResult = null;
+const centsText = (c) => `${c > 0 ? '+' : c < 0 ? '−' : '±'}${Math.abs(c)} Cent`;
+
+async function showTune() {
+  if (!OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = document.body.dataset.view;
+  if (!mic.active) await startMic();
+  if (!mic.active) return; // keine Erlaubnis – Hinweis kam schon als Meldung
+  tuneSession = new TuningSession();
+  tuneResult = null;
+  mic.calibrating = true;
+  document.body.dataset.view = 'tune';
+  $('#tune-result').hidden = true;
+  $('#tune-save').disabled = true;
+  $('#tune-count').textContent = `0 von ${MIN_SAMPLES} Tönen gemessen`;
+  $('#tune-current').textContent =
+    settings.refA === 440 ? 'Bisher: Kammerton a¹ = 440 Hz (nicht eingemessen)' : `Bisher eingemessen: a¹ ≈ ${settings.refA.toFixed(1)} Hz`;
+}
+
+function tuneFrame(frame, note) {
+  if (document.body.dataset.view !== 'tune' || !tuneSession) return;
+  // Live-Stimmgerät
+  if (frame.freq && frame.clarity >= 0.85 && frame.rms > 0.01) {
+    // Taste aus der laufenden Schätzung, Abweichung gegenüber Kammerton 440 Hz (wie im Ergebnis)
+    const n = nearestNote(frame.freq, tuneSession.refA ?? settings.refA);
+    const cents = Math.round((69 + 12 * Math.log2(frame.freq / 440) - midiNumber(n.note)) * 100);
+    $('#tuner-note').textContent = helmholtzName(n.note);
+    $('#tuner-cents').textContent = centsText(cents);
+    $('#tuner-needle').style.left = `${50 + Math.max(-50, Math.min(50, cents))}%`;
+  }
+  if (!tuneSession.feed(frame, note !== null)) return;
+  const count = tuneSession.samples.length;
+  $('#tune-count').textContent = `${Math.min(count, MIN_SAMPLES)} von ${MIN_SAMPLES} Tönen gemessen${count > MIN_SAMPLES ? ` (+${count - MIN_SAMPLES} weitere)` : ''}`;
+  tuneResult = tuneSession.result;
+  if (tuneResult) showTuneResult(tuneResult);
+}
+
+function showTuneResult(r) {
+  const dir = r.cents < 0 ? 'zu tief' : 'zu hoch';
+  const lines = [];
+  if (r.rating === 'gut') lines.push(`<b>Gut gestimmt</b> – Abweichung etwa ${centsText(r.cents)}.`);
+  else if (r.rating === 'leicht') lines.push(`<b>Leicht verstimmt:</b> etwa ${Math.abs(r.cents)} Cent ${dir}. Für die App kein Problem – das wird herausgerechnet.`);
+  else
+    lines.push(
+      `<b>Deutlich verstimmt:</b> etwa ${Math.abs(r.cents)} Cent ${dir} (a¹ ≈ ${r.refA.toFixed(0)} Hz). Die App rechnet das heraus. ` +
+        'Zum Zusammenspielen mit anderen Instrumenten oder Aufnahmen wäre Stimmen lassen sinnvoll.',
+    );
+  if (r.spread >= 15) lines.push(`Die Töne weichen unterschiedlich stark ab (etwa ±${r.spread} Cent). Erkennt die App einzelne Töne falsch, liegt es daran – dann hilft nur Stimmen.`);
+  const whiteOk = r.whiteShare >= 0.8;
+  if (!whiteOk) lines.push('<b>Bitte nur weiße Tasten spielen</b> – einige Töne passten nicht dazu. Einfach weiterspielen.');
+  lines.push(`<span class="tune-notes">${r.notes.map((n) => `${helmholtzName(n.note)} ${centsText(n.cents)}`).join(' · ')}</span>`);
+  $('#tune-result').innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
+  $('#tune-result').hidden = false;
+  $('#tune-save').disabled = !whiteOk;
+}
+
+function closeTune() {
+  mic.calibrating = false;
+  tuneSession = null;
+  document.body.dataset.view = viewBeforeOverview;
+  if (viewBeforeOverview === 'play') {
+    drawKeyboard();
+    if (!locked) shownAt = performance.now();
+    showFeedback(null);
+  }
+}
+
+function saveTuning(refA) {
+  settings.refA = refA;
+  mic.refA = refA;
+  saveSettings();
+  closeTune();
+  showToast(refA === 440 ? 'Zurückgesetzt auf a¹ = 440 Hz' : `Eingemessen: a¹ ≈ ${refA.toFixed(1)} Hz`);
+}
 
 async function startMic() {
   ui.micBtn.disabled = true;
   try {
     await mic.start();
     lastSoundAt = performance.now();
-    showToast('Mikrofon an – spiel die Noten am Klavier');
+    showToast(settings.refA === 440 ? 'Mikrofon an. Tipp: Klavier einmal „Einmessen“' : 'Mikrofon an – spiel die Noten am Klavier');
   } catch (err) {
     mic.stop();
     const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
@@ -353,16 +511,26 @@ for (const button of document.querySelectorAll('[data-mode]')) {
   });
 }
 
-for (const button of document.querySelectorAll('[data-level]')) {
-  button.addEventListener('click', () => {
-    const level = parseLevel(button.dataset.level);
-    if (settings.level === level) return;
-    settings.level = level;
-    saveSettings();
-    syncControls();
-    startRound();
-  });
-}
+$('#level').addEventListener('change', (event) => {
+  const level = parseLevel(event.target.value);
+  if (settings.level === level) return;
+  settings.level = level;
+  saveSettings();
+  syncControls();
+  if (level === 'lieder') showSongs();
+  else startRound();
+});
+
+ui.songList.addEventListener('click', (event) => {
+  const card = event.target.closest('[data-song]');
+  if (!card) return;
+  settings.song = card.dataset.song;
+  saveSettings();
+  startRound();
+});
+$('#song-list-btn').addEventListener('click', showSongs);
+$('#song-listen').addEventListener('click', playSong);
+ui.otherSong.addEventListener('click', showSongs);
 
 ui.sound.addEventListener('click', () => {
   settings.sound = !settings.sound;
@@ -374,6 +542,13 @@ ui.again.addEventListener('click', startRound);
 ui.micBtn.addEventListener('click', () => (mic.active ? stopMic() : startMic()));
 ui.overviewBtn.addEventListener('click', () => (document.body.dataset.view === 'overview' ? closeOverview() : showOverview()));
 ui.overviewBack.addEventListener('click', closeOverview);
+// Einmessen: Knopf im Mikrofon-Hinweis (wird neu gezeichnet, daher über die Rückmeldung abgefangen)
+ui.feedback.addEventListener('click', (event) => {
+  if (event.target.closest('[data-action="tune"]')) showTune();
+});
+$('#tune-save').addEventListener('click', () => tuneResult && saveTuning(tuneResult.refA));
+$('#tune-reset').addEventListener('click', () => saveTuning(440));
+$('#tune-cancel').addEventListener('click', closeTune);
 
 // Ton erst nach einer Nutzeraktion freischalten (Vorgabe der Handy-Browser)
 for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {

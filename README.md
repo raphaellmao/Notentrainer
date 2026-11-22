@@ -15,6 +15,12 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
 - **Adaptiv:** Pro Note werden Versuche, Fehler und Antwortzeit im Browser gespeichert (localStorage).
   Noten, die oft falsch oder langsam kommen, erscheinen häufiger. Dieselbe Note kommt nie zweimal hintereinander.
 
+- **Stufe 4 (Lieder):** ganze Lieder mit Rhythmus (Ganze, Halbe, Viertel, Achtel, Punktierungen), Zeile für Zeile spielen,
+  mit „Anhören“. Liederbuch in `js/songs.js` – nur gemeinfreie Melodien, Notensatz in `js/score.js`.
+- **Einmessen:** Im Mikrofon-Modus misst „Einmessen“ die Stimmung des eigenen Klaviers (`js/tuning.js`) und rechnet sie
+  bei der Erkennung heraus – auch bei einem stark verstimmten Klavier.
+- **Nur Klavier:** Die Erkennung ignoriert Singen und Sprechen (weicher Einsatz bzw. schwankende Tonhöhe).
+
 ## Aufbau
 
 | Datei | Aufgabe |

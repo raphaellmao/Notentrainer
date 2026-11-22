@@ -104,9 +104,10 @@ export class Piano {
   }
 
   // Ein Anschlag: Grundton + Obertöne, die unterschiedlich schnell verklingen
-  voice(freq) {
+  // delay: Sekunden ab jetzt (zum Vorspielen ganzer Melodien)
+  voice(freq, delay = 0) {
     const ctx = this.ctx;
-    const t = ctx.currentTime + 0.005;
+    const t = ctx.currentTime + 0.005 + delay;
     const dur = Math.min(3.2, 1.3 + 160 / freq); // tiefe Töne klingen länger
     const count = freq < 160 ? 10 : 7; // tiefe Töne brauchen Obertöne, sonst hört man sie am Handy kaum
 

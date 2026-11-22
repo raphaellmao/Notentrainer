@@ -7,11 +7,15 @@ const FRAME = 4096;
 const EVERY_MS = 30; // etwa 30 Auswertungen pro Sekunde
 
 export class Microphone {
-  // onNote(midi): neue Note erkannt; onLevel(rms): aktuelle Lautstärke; onEnded(): Mikrofon weg
-  constructor({ onNote, onLevel, onEnded }) {
+  // onNote(midi): neue Note erkannt; onLevel(rms, midi): Lautstärke + gehörte Note; onEnded(): Mikrofon weg;
+  // onFrame(frame, note): jedes Messfenster (fürs Einmessen)
+  constructor({ onNote, onLevel, onEnded, onFrame }) {
     this.onNote = onNote;
     this.onLevel = onLevel;
     this.onEnded = onEnded;
+    this.onFrame = onFrame;
+    this.refA = 440; // Stimmung des Klaviers (nach dem Einmessen)
+    this.calibrating = false; // beim Einmessen mit Kammerton 440 Hz messen
     this.stream = null;
     this.ctx = null;
     this.raf = 0;
@@ -53,13 +57,14 @@ export class Microphone {
     if (now - this.last < EVERY_MS) return;
     this.last = now;
     this.analyser.getFloatTimeDomainData(this.buf);
-    const frame = analyseFrame(this.buf, this.ctx.sampleRate);
+    const frame = analyseFrame(this.buf, this.ctx.sampleRate, this.calibrating ? 440 : this.refA);
     const { rms, hf, midi } = frame;
     // midi nur melden, wenn deutlich lauter als das Grundrauschen (für die Anzeige „höre: …“)
     const heard = midi !== null && rms > Math.max(this.listener.minRms, (this.listener.floor ?? 0) * 3) ? midi : null;
     this.onLevel?.(rms, heard);
     const note = this.listener.feed(rms, midi, now, hf, frame);
-    if (note !== null) this.onNote(note);
+    this.onFrame?.(frame, note);
+    if (note !== null && !this.calibrating) this.onNote(note);
   };
 
   // Nach dem Zurückkehren aus dem Hintergrund weiterlauschen

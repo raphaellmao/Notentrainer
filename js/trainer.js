@@ -34,6 +34,7 @@ const MAX_STEP = 4; // größter Schritt innerhalb einer Folge: Quinte (4 Stammt
 // unlocked: im Aufbau freigeschaltete Anzahl je Schlüssel
 export function buildPool(mode, level, unlocked = {}) {
   const clefs = mode === 'mixed' ? ['treble', 'bass'] : [mode];
+  if (level === 'lieder') return []; // Stufe 4: Noten kommen aus dem Lied (startSong)
   const notes = (clef) => {
     if (level === 'aufbau') return AUFBAU_ORDER[clef].slice(0, unlocked[clef] ?? AUFBAU_START);
     return levelNotes(clef, level === 'folgen' ? 2 : level);
@@ -172,6 +173,7 @@ export class Trainer {
     this.storage = storage;
     this.rng = rng;
     this.roundLength = roundLength;
+    this.baseRoundLength = roundLength;
     this.stats = loadStats(storage);
     this.unlocked = loadUnlocked(storage);
     this.mode = 'treble';
@@ -185,6 +187,7 @@ export class Trainer {
   configure(mode, level) {
     this.mode = mode;
     this.level = level;
+    this.roundLength = this.baseRoundLength;
     this.pool = buildPool(mode, level, this.unlocked);
     this.startRound();
   }
@@ -197,7 +200,18 @@ export class Trainer {
   }
 
   get isSequence() {
-    return this.level === 'folgen';
+    return this.level === 'folgen' || this.level === 'lieder';
+  }
+
+  // Stufe 4: ein ganzes Lied (Violinschlüssel) – die Runde ist so lang wie das Lied
+  startSong(notes) {
+    this.answers = [];
+    this.sequence = notes.map((note) => ({ clef: 'treble', note }));
+    this.roundLength = notes.length;
+    this.position = 0;
+    this.current = this.sequence[0];
+    this.previous = this.sequence[notes.length - 1];
+    return this.sequence;
   }
 
   next() {

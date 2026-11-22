@@ -9,7 +9,8 @@ const MIN_FREQ = 60; // knapp unter C (65 Hz)
 const MAX_FREQ = 1400; // knapp über c³ (1047 Hz)
 const THRESHOLD = 0.15;
 
-export const midiFromFreq = (freq) => 69 + 12 * Math.log2(freq / 440);
+// refA: Frequenz des a¹ (Kammerton 440 Hz; nach dem Einmessen die Stimmung des eigenen Klaviers)
+export const midiFromFreq = (freq, refA = 440) => 69 + 12 * Math.log2(freq / refA);
 
 // Grundfrequenz eines Signalausschnitts (Float32Array, Werte −1…1).
 // Ergebnis: { freq, clarity } oder null, wenn kein klarer Ton drin ist.
@@ -66,7 +67,7 @@ export function rms(buf) {
 // hoch, weil die hohen Obertöne eines klingenden Tons schnell verklingen.
 // Halbiert vor der Tonhöhen-Suche die Abtastrate (Mittelwert je zwei Werte): Für Töne bis
 // 1400 Hz reicht das völlig und spart drei Viertel der Rechenzeit.
-export function analyseFrame(buf, sampleRate) {
+export function analyseFrame(buf, sampleRate, refA = 440) {
   const level = rms(buf);
   let diff = 0;
   for (let i = 1; i < buf.length; i++) diff += (buf[i] - buf[i - 1]) ** 2;
@@ -74,8 +75,32 @@ export function analyseFrame(buf, sampleRate) {
   const half = new Float32Array(buf.length >> 1);
   for (let i = 0; i < half.length; i++) half[i] = (buf[2 * i] + buf[2 * i + 1]) / 2;
   const pitch = level > 0.002 ? detectPitch(half, sampleRate / 2) : null;
-  const midi = pitch && pitch.clarity >= 0.8 ? Math.round(midiFromFreq(pitch.freq)) : null;
-  return { rms: level, hf, midi, spec: magnitudeSpectrum(buf), sampleRate };
+  const midi = pitch && pitch.clarity >= 0.8 ? Math.round(midiFromFreq(pitch.freq, refA)) : null;
+  return { rms: level, hf, midi, freq: pitch?.freq ?? null, clarity: pitch?.clarity ?? 0, rise: attackRise(buf, sampleRate), spec: magnitudeSpectrum(buf), sampleRate, refA };
+}
+
+// Anstiegszeit (ms) eines frischen Einsatzes im Fenster: von 20 % auf 80 % der Spitze.
+// Klavier (Hammeranschlag): wenige Millisekunden. Stimme: weicher Einsatz, deutlich länger.
+// null, wenn im Fenster kein Einsatz aus der Stille zu sehen ist (z. B. alter Ton klingt noch).
+export function attackRise(buf, sampleRate) {
+  const block = Math.max(1, Math.round(sampleRate * 0.005)); // 5-ms-Blöcke
+  const n = Math.floor(buf.length / block);
+  const env = new Float32Array(n);
+  for (let b = 0; b < n; b++) {
+    let sum = 0;
+    for (let i = b * block; i < (b + 1) * block; i++) sum += buf[i] * buf[i];
+    env[b] = Math.sqrt(sum / block);
+  }
+  let peak = 0;
+  let at = -1;
+  for (let b = 0; b < n; b++) if (env[b] > peak) [peak, at] = [env[b], b];
+  if (peak < 0.005) return null;
+  let lo = -1;
+  for (let b = at; b >= 0; b--) if (env[b] < 0.2 * peak) { lo = b; break; }
+  if (lo < 0) return null;
+  let hi = lo;
+  while (hi < at && env[hi] < 0.8 * peak) hi++;
+  return (hi - lo) * 5;
 }
 
 // Betragsspektrum (Hann-Fenster, FFT) – nur für Längen, die Zweierpotenzen sind
@@ -134,15 +159,22 @@ function magAt(spec, freq, sampleRate) {
 
 // Ist am Grundton oder ersten Oberton dieser Note neue Energie aufgetaucht (seit ref)?
 // Verhindert „virtuelle Grundtöne“ aus Mischklängen (z. B. mit Pedal gehaltene Akkorde).
-export function hasNewEnergy(midi, spec, ref, sampleRate) {
+export function hasNewEnergy(midi, spec, ref, sampleRate, refA = 440) {
   if (!spec || !ref) return true;
   let peak = 0;
   for (let i = 0; i < spec.length; i++) peak = Math.max(peak, spec[i]);
-  const f0 = 440 * 2 ** ((midi - 69) / 12);
+  const f0 = refA * 2 ** ((midi - 69) / 12);
   return [f0, 2 * f0].some((f) => {
     const now = magAt(spec, f, sampleRate);
     return now > 2 * magAt(ref, f, sampleRate) && now > 0.05 * peak;
   });
+}
+
+// Schwankung der Tonhöhe in Cent (größter minus kleinster Wert)
+function wobble(freqs) {
+  if (freqs.length < 2) return 0;
+  const cents = freqs.map((f) => 1200 * Math.log2(f));
+  return Math.max(...cents) - Math.min(...cents);
 }
 
 // Erkennt einzelne gespielte Noten. Eine Note zählt, wenn
@@ -151,7 +183,11 @@ export function hasNewEnergy(midi, spec, ref, sampleRate) {
 //   b) die Tonhöhe stabil auf einen anderen Ton wechselt (leiser Anschlag unter einem lauten).
 // Ein bloß nachklingender Ton löst keine neue Antwort aus.
 export class NoteListener {
-  constructor({ minRms = 0.006, rise = 1.6, levelRise = 2, stableFrames = 3, changeFrames = 4, windowMs = 600, settleMs = 50, refractoryMs = 250 } = {}) {
+  constructor({ minRms = 0.006, rise = 1.6, levelRise = 2, stableFrames = 3, changeFrames = 4, windowMs = 600, settleMs = 50, refractoryMs = 250, pianoOnly = true } = {}) {
+    // Klavier-Filter: Stimme (weicher Einsatz, schwankende Tonhöhe) zählt nicht
+    this.pianoOnly = pianoOnly;
+    this.maxRiseMs = 35; // Klavier erreicht seine Lautstärke schneller
+    this.maxWobbleCents = 15; // Klavierton steht still; Stimme hat Vibrato oder gleitet
     this.changeFrames = changeFrames; // für Regel b) etwas strenger
     this.run = { midi: null, count: 0 }; // gleiche Tonhöhe in Folge
     this.sounding = null; // zuletzt gemeldete, noch klingende Note
@@ -176,6 +212,7 @@ export class NoteListener {
     const prevSpec = this.lastSpec ?? null;
     this.lastSpec = frame?.spec ?? null;
     this.sampleRate = frame?.sampleRate ?? this.sampleRate;
+    this.refA = frame?.refA ?? this.refA ?? 440;
     this.floor = this.floor === null ? level : Math.min(level, this.floor * 1.01);
     this.history = this.history.filter((h) => t - h.t <= 200);
     const minHf = this.history.length ? Math.min(...this.history.map((h) => h.hf)) : hf;
@@ -191,11 +228,18 @@ export class NoteListener {
       this.candidate = null;
       this.count = 0;
       this.onsetRef = prevSpec; // Spektrum vor dem Anschlag
+      this.onsetRise = null;
+      this.candFreqs = [];
     }
+    // längste Anstiegszeit in den ersten 120 ms merken: Das erste Fenster schneidet einen weichen
+    // Einsatz nur an (wirkt dort kurz); erst die folgenden Fenster zeigen ihn ganz
+    if (this.open && t - this.onsetAt <= 120 && frame?.rise != null) this.onsetRise = Math.max(this.onsetRise ?? 0, frame.rise);
 
     // b) stabiler Tonwechsel
-    if (midi !== null && midi === this.run.midi) this.run.count++;
-    else this.run = { midi, count: midi === null ? 0 : 1, ref: prevSpec };
+    if (midi !== null && midi === this.run.midi) {
+      this.run.count++;
+      if (frame?.freq) this.run.freqs.push(frame.freq);
+    } else this.run = { midi, count: midi === null ? 0 : 1, ref: prevSpec, freqs: frame?.freq && midi !== null ? [frame.freq] : [] };
 
     if (this.open && t - this.onsetAt > this.windowMs) this.open = false;
     if (this.open) {
@@ -204,17 +248,34 @@ export class NoteListener {
       else {
         this.candidate = midi;
         this.count = 1;
+        this.candFreqs = [];
       }
-      if (this.count >= this.stableFrames) return this.emit(midi, this.onsetRef);
+      if (frame?.freq) this.candFreqs.push(frame.freq);
+      if (this.count >= this.stableFrames) {
+        if (this.pianoOnly && this.onsetRise !== null && this.onsetRise > this.maxRiseMs) return this.reject(midi); // weicher Einsatz
+        if (this.pianoOnly && wobble(this.candFreqs) > this.maxWobbleCents) return this.reject(midi); // Tonhöhe schwankt
+        return this.emit(midi, this.onsetRef);
+      }
       return null;
     }
-    if (loudEnough && this.run.count >= this.changeFrames && this.run.midi !== this.sounding) return this.emit(this.run.midi, this.run.ref);
+    if (loudEnough && this.run.count >= this.changeFrames && this.run.midi !== this.sounding) {
+      if (this.pianoOnly && wobble(this.run.freqs) > this.maxWobbleCents) return null;
+      return this.emit(this.run.midi, this.run.ref);
+    }
+    return null;
+  }
+
+  // Ton gehört, aber nicht vom Klavier: nicht melden, aber merken (sonst Tonwechsel-Regel)
+  reject(midi) {
+    this.open = false;
+    this.sounding = midi;
+    this.rejected = (this.rejected ?? 0) + 1;
     return null;
   }
 
   emit(midi, ref) {
     this.open = false;
-    if (!hasNewEnergy(midi, this.lastSpec, ref, this.sampleRate)) return null; // Mischklang: lieber nichts
+    if (!hasNewEnergy(midi, this.lastSpec, ref, this.sampleRate, this.refA)) return null; // Mischklang: lieber nichts
     this.sounding = midi;
     return midi;
   }
