@@ -1,27 +1,30 @@
 // Notenmodell: Tonhöhen, deutsche Namen, Schlüssel und Position im Notensystem.
 // Reine Funktionen ohne DOM – laufen im Browser und in Node (Tests).
 //
-// Intern wird eine Note als Text geschrieben: Buchstabe, optional "#", Oktave in
-// wissenschaftlicher Schreibweise. "C4" ist das mittlere C (= c¹), "B3" ist das
-// kleine h, "F#4" ist fis¹. Englische Buchstaben gibt es nur intern; angezeigt
-// wird immer deutsch (H statt B).
+// Intern wird eine Note als Text geschrieben: Buchstabe, optional "#" (Kreuz) oder "b" (b),
+// Oktave in wissenschaftlicher Schreibweise. "C4" ist das mittlere C (= c¹), "B3" ist das
+// kleine h, "F#4" ist fis¹, "Bb4" ist b¹ (deutsch: B = das erniedrigte H), "Eb4" ist es¹.
+// Englische Buchstaben gibt es nur intern; angezeigt wird immer deutsch.
 
 export const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const GERMAN = { C: 'C', D: 'D', E: 'E', F: 'F', G: 'G', A: 'A', B: 'H' };
 const GERMAN_SHARP = { C: 'Cis', D: 'Dis', F: 'Fis', G: 'Gis', A: 'Ais' };
+const GERMAN_FLAT = { D: 'Des', E: 'Es', G: 'Ges', A: 'As', B: 'B' };
 const SUPERSCRIPT = ['', '¹', '²', '³', '⁴', '⁵'];
 const SUBSCRIPT = ['', '₁', '₂'];
 
+// Nur die üblichen Schreibweisen der schwarzen Tasten (kein Eis, His, Ces, Fes)
 export function parseNote(id) {
-  const m = /^([A-G])(#?)(\d)$/.exec(id);
+  const m = /^([A-G])(#|b)?(\d)$/.exec(id);
   if (!m) throw new Error(`Unbekannte Note: ${id}`);
-  const [, letter, sharp, octave] = m;
-  if (sharp && (letter === 'E' || letter === 'B')) throw new Error(`Keine schwarze Taste: ${id}`);
-  return { letter, sharp: sharp === '#', octave: Number(octave) };
+  const [, letter, accidental = '', octave] = m;
+  if (accidental === '#' && !GERMAN_SHARP[letter]) throw new Error(`Keine schwarze Taste: ${id}`);
+  if (accidental === 'b' && !GERMAN_FLAT[letter]) throw new Error(`Keine schwarze Taste: ${id}`);
+  return { letter, accidental, sharp: accidental === '#', flat: accidental === 'b', octave: Number(octave) };
 }
 
-export const isNatural = (id) => !parseNote(id).sharp;
+export const isNatural = (id) => parseNote(id).accidental === '';
 
 // Zählt die Stammtöne (weiße Tasten) durch: C0 = 0, D0 = 1, … C4 = 28.
 export function diatonicIndex(id) {
@@ -35,14 +38,17 @@ export function naturalFromIndex(index) {
 }
 
 export function midiNumber(id) {
-  const { letter, sharp, octave } = parseNote(id);
-  return 12 * (octave + 1) + SEMITONE[letter] + (sharp ? 1 : 0);
+  const { letter, sharp, flat, octave } = parseNote(id);
+  return 12 * (octave + 1) + SEMITONE[letter] + (sharp ? 1 : 0) - (flat ? 1 : 0);
 }
+
+// Gleiche Taste? (Fis = Ges, Ais = B …)
+export const sameKey = (a, b) => midiNumber(a) === midiNumber(b);
 
 // Gleichstufige Stimmung, a¹ = 440 Hz
 export const frequency = (id) => 440 * 2 ** ((midiNumber(id) - 69) / 12);
 
-// MIDI-Nummer → Note ("C4", "F#3" …); schwarze Tasten immer mit Kreuz
+// MIDI-Nummer → Note ("C4", "F#3" …); schwarze Tasten immer mit Kreuz (so heißen die Klaviertasten intern)
 const CHROMATIC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export function noteFromMidi(midi) {
   const octave = Math.floor(midi / 12) - 1;
@@ -50,10 +56,20 @@ export function noteFromMidi(midi) {
   return name.length === 2 ? `${name[0]}#${octave}` : `${name}${octave}`;
 }
 
-// Deutscher Tonname ohne Oktave: C D E F G A H (schwarze Tasten: Cis, Dis, Fis, Gis, Ais)
+// Taste auf der Klaviatur zu einer Note (Bb4 → A#4)
+export const keyOf = (id) => noteFromMidi(midiNumber(id));
+
+// Schwarze Taste in b-Schreibweise (A#4 → Bb4), weiße Tasten unverändert
+const TO_FLAT = { C: 'Db', D: 'Eb', F: 'Gb', G: 'Ab', A: 'Bb' };
+export function asFlat(id) {
+  const { letter, sharp, octave } = parseNote(id);
+  return sharp ? `${TO_FLAT[letter]}${octave}` : id;
+}
+
+// Deutscher Tonname ohne Oktave: C D E F G A H; Kreuz: Cis Dis Fis Gis Ais; b: Des Es Ges As B
 export function germanName(id) {
-  const { letter, sharp } = parseNote(id);
-  return sharp ? GERMAN_SHARP[letter] : GERMAN[letter];
+  const { letter, sharp, flat } = parseNote(id);
+  return sharp ? GERMAN_SHARP[letter] : flat ? GERMAN_FLAT[letter] : GERMAN[letter];
 }
 
 // Deutsche Oktavschreibweise (Helmholtz): C2 = C, C3 = c, C4 = c¹, C5 = c², C6 = c³

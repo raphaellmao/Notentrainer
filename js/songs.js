@@ -1,5 +1,6 @@
 // Liederbuch für Stufe 4 – nur gemeinfreie Melodien (Volkslieder bzw. Komponisten lange
-// verstorben). Alle in C-Dur ohne Vorzeichen und im Bereich der Violin-Klaviatur (c¹–c³).
+// verstorben), alle im Bereich der Violin-Klaviatur (c¹–c³). key: Tonart (Standard C-Dur);
+// Noten mit ihrer tatsächlichen Tonhöhe schreiben (in F-Dur also "Bb4"), die Vorzeichen setzt der Notensatz.
 // Wo die übliche Tonlage unter c¹ reichen würde, steht das Lied eine Oktave höher.
 //
 // Schreibweise: Note + Wert (w Ganze, h Halbe, q Viertel, e Achtel, Punkt = punktiert), Takte mit „|“.
@@ -41,12 +42,13 @@ export const SONGS = [
   {
     id: 'jakob',
     title: 'Bruder Jakob',
-    origin: 'Volkslied (Kanon), eine Oktave höher',
+    origin: 'Volkslied (Kanon), F-Dur mit einem b',
     time: [4, 4],
+    key: 'F',
     tempo: 100,
     melody:
-      'C5q D5q E5q C5q | C5q D5q E5q C5q | E5q F5q G5h | E5q F5q G5h | ' +
-      'G5e A5e G5e F5e E5q C5q | G5e A5e G5e F5e E5q C5q | C5q G4q C5h | C5q G4q C5h',
+      'F4q G4q A4q F4q | F4q G4q A4q F4q | A4q Bb4q C5h | A4q Bb4q C5h | ' +
+      'C5e D5e C5e Bb4e A4q F4q | C5e D5e C5e Bb4e A4q F4q | F4q C4q F4h | F4q C4q F4h',
   },
   {
     id: 'jinglebells',

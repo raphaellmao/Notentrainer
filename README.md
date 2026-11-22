@@ -19,6 +19,8 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
   mit „Anhören“. Liederbuch in `js/songs.js` – nur gemeinfreie Melodien, Notensatz in `js/score.js`.
 - **Einmessen:** Im Mikrofon-Modus misst „Einmessen“ die Stimmung des eigenen Klaviers (`js/tuning.js`) und rechnet sie
   bei der Erkennung heraus – auch bei einem stark verstimmten Klavier.
+- **Vorzeichen:** Stufe „Vorzeichen“ mit Kreuz und b (deutsche Namen: Cis … Ais, Des Es Ges As B); Fis und Ges sind dieselbe
+  Taste. Lieder können eine Tonart haben (`key` in `js/songs.js`), die Vorzeichen setzt der Notensatz nach den üblichen Regeln.
 - **Nur Klavier:** Die Erkennung ignoriert Singen und Sprechen (weicher Einsatz bzw. schwankende Tonhöhe).
 
 ## Aufbau

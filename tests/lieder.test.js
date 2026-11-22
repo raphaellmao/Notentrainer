@@ -29,7 +29,7 @@ function expectedStep(desc) {
 const NUM = '(-?[0-9.]+)';
 function parseLine(svg) {
   const staff = [...svg.matchAll(new RegExp(`<line class="staff-line" x1="${NUM}" y1="${NUM}"`, 'g'))].map((m) => +m[2]).sort((a, b) => b - a);
-  const notes = [...svg.matchAll(/<g class="note[^"]*" data-note="([^"]+)" data-index="([0-9]+)" data-value="([^"]+)" transform="translate[(]([-0-9.]+) ([-0-9.]+)[)]" fill="currentColor">(.*?)<\/g>/g)].map((m) => ({
+  const notes = [...svg.matchAll(/<g class="note[^"]*" data-note="([^"]+)" data-index="([0-9]+)" data-value="([^"]+)" transform="translate[(]([-0-9.]+) ([-0-9.]+)[)]" fill="currentColor">((?:<g class="accidental".*?<\/g>)?.*?)<\/g>/g)].map((m) => ({
     note: m[1], index: +m[2], value: m[3], x: +m[4], y: +m[5], body: m[6],
   }));
   const ledgers = [...svg.matchAll(new RegExp(`<line class="ledger-line" data-index="([0-9]+)" x1="${NUM}" y1="${NUM}" x2="${NUM}"`, 'g'))].map((m) => ({ index: +m[1], x1: +m[2], y: +m[3], x2: +m[4] }));
@@ -57,7 +57,7 @@ test('Liederbuch: bekannte Melodieanfänge stimmen', () => {
   assert.equal(start('entchen', 6), 'C4 D4 E4 F4 G4 G4'); // c d e f g g
   assert.equal(start('weihnachtsmann', 7), 'C4 C4 G4 G4 A4 A4 G4'); // c c g g a a g
   assert.equal(start('haenschen', 6), 'G4 E4 E4 F4 D4 D4'); // g e e f d d
-  assert.equal(start('jakob', 8), 'C5 D5 E5 C5 C5 D5 E5 C5'); // c d e c c d e c
+  assert.equal(start('jakob', 8), 'F4 G4 A4 F4 F4 G4 A4 F4'); // f g a f f g a f (F-Dur)
   assert.equal(start('freude', 8), 'E5 E5 F5 G5 G5 F5 E5 D5'); // e e f g g f e d
   assert.equal(start('jinglebells', 7), 'E4 E4 E4 E4 E4 E4 E4');
 });
@@ -77,7 +77,7 @@ for (const song of SONGS) {
       const middle = s.staff[2];
       s.notes.forEach((n, k) => {
         const where = `${song.title} Note ${n.index + 1} (${n.note}${n.value})`;
-        const exp = expectedStep(POSITION[n.note]);
+        const exp = expectedStep(POSITION[n.note.replace(/[#b]/, '')]); // b¹ steht wie h¹, fis¹ wie f¹
         assert.ok(Math.abs(n.y - (L1 - (exp.step * d) / 2)) < 1e-6, `${where}: Höhe`);
         const ledgers = s.ledgers.filter((l) => l.index === n.index);
         assert.equal(ledgers.length, exp.ledgers, `${where}: Hilfslinien`);
@@ -143,4 +143,54 @@ test('Stufe 4: ein Lied wird Note für Note gespielt, die Runde ist so lang wie 
   // danach wieder normale Runden mit 20 Noten
   trainer.configure('treble', 1);
   assert.equal(trainer.progress.total, 20);
+});
+
+// --- Tonarten und Vorzeichen-Regeln ---
+
+import { keySignatureNotes, accidentalsShown, keyAccidentals } from '../js/score.js';
+
+test('Tonarten: Vorzeichen stehen an der üblichen Stelle (von Hand eingetragen)', () => {
+  // Violinschlüssel: Fis auf Linie 5, Cis im 3. Zwischenraum; B auf Linie 3, Es im 4. Zwischenraum
+  assert.deepEqual(keySignatureNotes('treble', 'G'), ['F5']);
+  assert.deepEqual(keySignatureNotes('treble', 'D'), ['F5', 'C5']);
+  assert.deepEqual(keySignatureNotes('treble', 'F'), ['B4']);
+  assert.deepEqual(keySignatureNotes('treble', 'Bb'), ['B4', 'E5']);
+  // Bassschlüssel: Fis auf Linie 4, Cis im 2. Zwischenraum; B auf Linie 2, Es im 3. Zwischenraum
+  assert.deepEqual(keySignatureNotes('bass', 'G'), ['F3']);
+  assert.deepEqual(keySignatureNotes('bass', 'D'), ['F3', 'C3']);
+  assert.deepEqual(keySignatureNotes('bass', 'F'), ['B2']);
+  assert.deepEqual(keySignatureNotes('bass', 'Bb'), ['B2', 'E3']);
+  assert.deepEqual(keySignatureNotes('treble', 'C'), []);
+  assert.deepEqual(keyAccidentals('D'), { F: '#', C: '#' });
+  assert.deepEqual(keyAccidentals('Eb'), { B: 'b', E: 'b', A: 'b' });
+});
+
+test('Tonarten: Zeichen der Tonart werden auf Linie bzw. Zwischenraum gezeichnet', () => {
+  const svg = renderScoreLine(layoutScore({ melody: 'G4w', time: [4, 4], key: 'D' }), 0);
+  const signs = [...svg.matchAll(/<g class="accidental key" data-acc="([#b])" transform="translate[(]([-0-9.]+) ([-0-9.]+)[)]/g)];
+  const L1 = parseLine(svg).staff[0];
+  assert.equal(signs.length, 2);
+  assert.ok(signs.every((m) => m[1] === '#'));
+  assert.equal(+signs[0][3], L1 - 8 * 5, 'Fis auf Linie 5');
+  assert.equal(+signs[1][3], L1 - 5 * 5, 'Cis im 3. Zwischenraum');
+  assert.ok(+signs[1][2] > +signs[0][2], 'nebeneinander von links nach rechts');
+});
+
+test('Vorzeichen-Regeln: Tonart gilt, Zeichen gilt bis zum Taktstrich, Abweichung bekommt ♮', () => {
+  const shown = (melody, key) => accidentalsShown(parseMelody(melody), key).map((m) => m.map((n) => n.showAcc ?? '-').join(' '));
+  // G-Dur: fis ohne Zeichen; f (ohne Kreuz) braucht ♮; danach fis wieder mit #; neuer Takt: Tonart gilt wieder
+  assert.deepEqual(shown('F#4q F#4q F4q F#4q | F#4q G4q A4q B4q', 'G'), ['- - n #', '- - - -']);
+  // C-Dur: Kreuz gilt im Takt weiter, nur für diese Oktave
+  assert.deepEqual(shown('F#4q F#4q F#5q F4q | F4q F#4q F4q F4q', 'C'), ['# - # n', '- # n -']);
+  // F-Dur: B ohne Zeichen, H braucht ♮
+  assert.deepEqual(shown('Bb4q B4q Bb4q A4q', 'F'), ['- n b -']);
+});
+
+test('Bruder Jakob in F-Dur: ein b am Zeilenanfang, die B-Noten ohne eigenes Zeichen', () => {
+  const song = SONGS.find((s) => s.id === 'jakob');
+  const layout = layoutScore(song);
+  const all = layout.lines.map((_, i) => renderScoreLine(layout, i)).join('');
+  assert.equal([...all.matchAll(/class="accidental key" data-acc="b"/g)].length, layout.lines.length, 'ein b je Zeile');
+  assert.doesNotMatch(all, /<g class="accidental" /, 'keine Zeichen an den Noten');
+  assert.ok(parseMelody(song.melody).flat().some((n) => n.note === 'Bb4'), 'enthält B');
 });

@@ -3,10 +3,53 @@
 //
 // Liedschreibweise: Note + Wert, Takte durch „|“ getrennt, z. B. "C4q D4q E4h | G4w".
 // Werte: w = Ganze, h = Halbe, q = Viertel, e = Achtel; ein Punkt dahinter verlängert um die Hälfte.
+// Noten werden mit ihrer tatsächlichen Tonhöhe geschrieben ("Bb4q", "F#4h"); ob vor der Note ein
+// Zeichen steht, ergibt sich aus Tonart und Takt (siehe accidentalsShown).
 
-import { staffStep, ledgerSteps, isNatural } from './notes.js';
+import { staffStep, ledgerSteps, parseNote } from './notes.js';
 import { GEOMETRY, SPACE, stepY, WHOLE_NOTE } from './staff.js';
-import { CLEF_SHAPES } from './clefs.js';
+import { CLEF_SHAPES, accidentalSvg } from './clefs.js';
+
+// Tonarten: Anzahl Kreuze bzw. b. Reihenfolge der Zeichen: Kreuze F C G D A E H, b: B E A D G C F
+export const KEYS = { C: ['', 0], G: ['#', 1], D: ['#', 2], A: ['#', 3], E: ['#', 4], F: ['b', 1], Bb: ['b', 2], Eb: ['b', 3], Ab: ['b', 4] };
+const SHARP_ORDER = 'FCGDAEB';
+const FLAT_ORDER = 'BEADGCF';
+// Wo die Zeichen der Tonart im System stehen (übliche Lage)
+const KEY_POSITIONS = {
+  treble: { '#': ['F5', 'C5', 'G5', 'D5', 'A4', 'E5', 'B4'], b: ['B4', 'E5', 'A4', 'D5', 'G4', 'C5', 'F4'] },
+  bass: { '#': ['F3', 'C3', 'G3', 'D3', 'A2', 'E3', 'B2'], b: ['B2', 'E3', 'A2', 'D3', 'G2', 'C3', 'F2'] },
+};
+
+// Vorzeichen der Tonart je Stammton, z. B. G-Dur → { F: '#' }
+export function keyAccidentals(key = 'C') {
+  const [type, count] = KEYS[key];
+  const order = type === '#' ? SHARP_ORDER : FLAT_ORDER;
+  return Object.fromEntries([...order.slice(0, count)].map((letter) => [letter, type]));
+}
+
+// Noten, auf denen die Zeichen der Tonart stehen (für die Zeichnung am Zeilenanfang)
+export function keySignatureNotes(clef, key = 'C') {
+  const [type, count] = KEYS[key];
+  return count ? KEY_POSITIONS[clef][type].slice(0, count) : [];
+}
+export const keySignatureType = (key = 'C') => KEYS[key][0];
+
+// Welches Zeichen steht vor jeder Note? Regeln wie im Notendruck: Die Tonart gilt immer; ein Zeichen
+// im Takt gilt für diese Note bis zum Taktstrich; Abweichungen bekommen ♯, ♭ oder das Auflösungszeichen ♮.
+export function accidentalsShown(measures, key = 'C') {
+  const fromKey = keyAccidentals(key);
+  for (const m of measures) {
+    const inMeasure = new Map();
+    for (const n of m) {
+      const { letter, octave, accidental } = parseNote(n.note);
+      const id = `${letter}${octave}`;
+      const expected = inMeasure.has(id) ? inMeasure.get(id) : fromKey[letter] ?? '';
+      n.showAcc = accidental === expected ? null : accidental || 'n';
+      inMeasure.set(id, accidental);
+    }
+  }
+  return measures;
+}
 
 export const BEATS = { w: 4, h: 2, q: 1, e: 0.5 }; // in Vierteln
 
@@ -22,10 +65,10 @@ export const SCORE = {
 
 // "C4q." → { note: 'C4', value: 'q', dotted: true, beats: 1.5 }
 export function parseToken(token) {
-  const m = /^([A-G][0-9])([whqe])(\.?)$/.exec(token);
+  const m = /^([A-G](?:#|b)?[0-9])([whqe])(\.?)$/.exec(token);
   if (!m) throw new Error(`Unbekannte Note im Lied: ${token}`);
   const [, note, value, dot] = m;
-  if (!isNatural(note)) throw new Error(`Nur Stammtöne: ${token}`);
+  parseNote(note); // prüft, ob es die Note gibt (kein Eis, Ces …)
   return { note, value, dotted: dot === '.', beats: BEATS[value] * (dot ? 1.5 : 1) };
 }
 
@@ -43,15 +86,19 @@ export function parseMelody(text) {
 export const measureBeats = ([top, bottom]) => (top * 4) / bottom;
 
 const advance = (n) => Math.max(19, 14 + 4 * n.beats); // horizontaler Platz einer Note
+const ACC_WIDTH = 9; // zusätzlicher Platz für ein Zeichen vor der Note
+const widthOf = (n) => advance(n) + (n.showAcc ? ACC_WIDTH : 0);
+const keySigWidth = (key) => (KEYS[key ?? 'C'][1] ? KEYS[key ?? 'C'][1] * 9 + 5 : 0);
 
 // Zeilen aufteilen und Notenpositionen festlegen
 export function layoutScore(song) {
-  const measures = parseMelody(song.melody);
-  const natural = measures.map((m) => SCORE.measurePad + m.reduce((s, n) => s + advance(n), 0) + 3);
+  const measures = accidentalsShown(parseMelody(song.melody), song.key);
+  const natural = measures.map((m) => SCORE.measurePad + m.reduce((s, n) => s + widthOf(n), 0) + 3);
+  const ks = keySigWidth(song.key);
   const lines = [];
   let current = null;
   measures.forEach((m, i) => {
-    const room = SCORE.lineContent - (lines.length === 0 && !current ? SCORE.timeSigWidth : 0);
+    const room = SCORE.lineContent - ks - (lines.length === 0 && !current ? SCORE.timeSigWidth : 0);
     if (!current || current.width + natural[i] > current.room) {
       current = { measures: [], width: 0, room };
       lines.push(current);
@@ -64,8 +111,10 @@ export function layoutScore(song) {
   return {
     width,
     time: song.time,
+    key: song.key ?? 'C',
+    keySigWidth: ks,
     lines: lines.map((line, li) => {
-      const start = SCORE.clefArea + (li === 0 ? SCORE.timeSigWidth : 0);
+      const start = SCORE.clefArea + ks + (li === 0 ? SCORE.timeSigWidth : 0);
       const last = li === lines.length - 1;
       const scale = last ? 1 : line.room / line.width; // volle Zeilen auf Breite ziehen
       let x = start;
@@ -75,8 +124,9 @@ export function layoutScore(song) {
         let nx = x + SCORE.measurePad * scale;
         for (const n of measures[mi]) {
           const step = staffStep('treble', n.note);
-          notes.push({ ...n, measure: mi, step, x: +(nx + (advance(n) * scale) / 2 - 2).toFixed(2), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
-          nx += advance(n) * scale;
+          const x = nx + ((n.showAcc ? ACC_WIDTH : 0) + advance(n) / 2 - 2) * scale;
+          notes.push({ ...n, measure: mi, step, x: +x.toFixed(2), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
+          nx += widthOf(n) * scale;
         }
         x += natural[mi] * scale;
         bars.push(x);
@@ -109,6 +159,7 @@ function flag(stemUp, end) {
 function noteShape(n) {
   const middle = stepY(4);
   const parts = [];
+  if (n.showAcc) parts.push(accidentalSvg(n.showAcc, n.value === 'w' ? -15 : -13, 0));
   if (n.value === 'w') parts.push(`<path fill-rule="evenodd" d="${WHOLE_NOTE}"/>`);
   else parts.push(`<path class="head" fill-rule="evenodd" d="${n.value === 'h' ? HEAD_HOLLOW : HEAD_FILLED}"/>`);
   let stem = null;
@@ -134,10 +185,14 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
   const top = stepY(8);
   const bottom = stepY(0);
   const staffLines = [0, 2, 4, 6, 8].map((s) => `<line class="staff-line" x1="${g.lineLeft}" y1="${stepY(s)}" x2="${layout.width - 4}" y2="${stepY(s)}"/>`).join('');
+  const tx = SCORE.clefArea + layout.keySigWidth + 7;
   const time = line.first
     ? `<g class="time" font-family="'Times New Roman', Georgia, serif" font-weight="700" font-size="21" text-anchor="middle" fill="currentColor">` +
-      `<text x="${SCORE.clefArea + 7}" y="${stepY(6) + 7.3}">${layout.time[0]}</text><text x="${SCORE.clefArea + 7}" y="${stepY(2) + 7.3}">${layout.time[1]}</text></g>`
+      `<text x="${tx}" y="${stepY(6) + 7.3}">${layout.time[0]}</text><text x="${tx}" y="${stepY(2) + 7.3}">${layout.time[1]}</text></g>`
     : '';
+  const keySig = keySignatureNotes('treble', layout.key)
+    .map((note, i) => accidentalSvg(keySignatureType(layout.key), SCORE.clefArea + 3 + i * 9, stepY(staffStep('treble', note))).replace('class="accidental"', 'class="accidental key"'))
+    .join('');
   const cur = line.notes.find((n) => n.index === current);
   const cursor = cur ? `<rect class="cursor" x="${cur.x - 10}" y="3" width="20" height="${g.height - 6}" rx="5"/>` : '';
   const ledgers = line.notes
@@ -164,6 +219,7 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
     cursor +
     `<g class="staff-lines" stroke="currentColor" stroke-width="${g.lineWidth}">${staffLines}</g>` +
     `<g class="clef" data-clef="treble" transform="translate(${g.clefX} ${stepY(2)}) scale(${SPACE})" fill="currentColor">${CLEF_SHAPES.treble}</g>` +
+    keySig +
     time +
     `<g class="ledger-lines" stroke="currentColor" stroke-width="${g.ledgerWidth}">${ledgers}</g>` +
     `<g class="bar-lines" stroke="currentColor">${bars}</g>` +

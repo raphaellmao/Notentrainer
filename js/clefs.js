@@ -134,3 +134,25 @@ export const CLEF_SHAPES = {
 
 // Für Tests und Prüfseite: Rohdaten der Formen
 export const CLEF_PARTS = { TREBLE_STROKE, TREBLE_BALL, BASS_STROKE, BASS_BALL, BASS_DOTS };
+
+// --- Vorzeichen: Kreuz, b, Auflösungszeichen (Einheit: Linienabstand, Ursprung = Höhe der Note) ---
+
+const bar = (x1, x2, yc, h, slope) =>
+  `M${x1} ${+(yc + h / 2 + slope).toFixed(3)}L${x2} ${+(yc + h / 2 - slope).toFixed(3)}L${x2} ${+(yc - h / 2 - slope).toFixed(3)}L${x1} ${+(yc - h / 2 + slope).toFixed(3)}Z`;
+const rect = (x, y, w, h) => `M${x} ${y}h${w}v${h}h${-w}Z`;
+
+export const ACCIDENTAL_SHAPES = {
+  // Kreuz: zwei senkrechte Striche, zwei kräftige schräge Balken um die Notenhöhe
+  '#': `<path d="${rect(-0.33, -1.3, 0.11, 2.5)}${rect(0.22, -1.2, 0.11, 2.5)}${bar(-0.55, 0.55, -0.4, 0.24, 0.14)}${bar(-0.55, 0.55, 0.42, 0.24, 0.14)}"/>`,
+  // b: Hals nach oben, Bauch auf Höhe der Note
+  b:
+    `<path fill-rule="evenodd" d="${rect(-0.42, -1.75, 0.11, 2.27)}` +
+    'M-0.36 0.52C0.3 0.2 0.74 -0.12 0.62 -0.4C0.5 -0.68 0.05 -0.64 -0.36 -0.24Z' +
+    'M-0.31 0.27C0.02 0.07 0.36 -0.15 0.32 -0.31C0.27 -0.44 0.02 -0.38 -0.31 -0.11Z"/>',
+  // Auflösungszeichen ♮
+  n: `<path d="${rect(-0.33, -1.35, 0.11, 1.95)}${rect(0.22, -0.6, 0.11, 1.95)}${bar(-0.33, 0.33, -0.36, 0.22, 0.1)}${bar(-0.33, 0.33, 0.36, 0.22, 0.1)}"/>`,
+};
+
+// Vorzeichen als SVG-Gruppe an der Stelle (x|y) in Notensystem-Einheiten
+export const accidentalSvg = (acc, x, y, space = 10) =>
+  `<g class="accidental" data-acc="${acc}" transform="translate(${+x.toFixed(2)} ${y}) scale(${space})" fill="currentColor">${ACCIDENTAL_SHAPES[acc]}</g>`;

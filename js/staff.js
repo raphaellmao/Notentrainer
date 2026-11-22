@@ -1,8 +1,8 @@
 // Notendarstellung: Notensystem mit Schlüssel und einer ganzen Note als SVG.
 // Liefert SVG-Text (kein DOM nötig), damit sich die Positionen in Node testen lassen.
 
-import { CLEFS, staffStep, ledgerSteps } from './notes.js';
-import { CLEF_SHAPES } from './clefs.js';
+import { CLEFS, staffStep, ledgerSteps, parseNote } from './notes.js';
+import { CLEF_SHAPES, accidentalSvg } from './clefs.js';
 
 export const SPACE = 10; // Abstand zweier Notenlinien in SVG-Einheiten
 
@@ -36,6 +36,12 @@ export const WHOLE_NOTE = (() => {
 })();
 
 export const stepY = (step) => GEOMETRY.bottomLineY - (step * SPACE) / 2;
+
+// Kreuz bzw. b vor der Note (Stammtöne ohne Zeichen)
+function accidentalOf(note, x, y) {
+  const { accidental } = parseNote(note);
+  return accidental ? accidentalSvg(accidental, x, y) : '';
+}
 
 // Geometrie einer Note im Notensystem – daraus zeichnet renderStaff.
 export function staffLayout(clef, note) {
@@ -120,6 +126,7 @@ export function renderStaff(clef, note, { label = 'Notensystem mit einer Note' }
     `<g class="staff-lines" stroke="currentColor" stroke-width="${g.lineWidth}">${lines}</g>` +
     `<g class="clef" data-clef="${clef}" transform="translate(${g.clefX} ${L.clefY}) scale(${SPACE})" fill="currentColor">${CLEF_SHAPES[clef]}</g>` +
     `<g class="ledger-lines" stroke="currentColor" stroke-width="${g.ledgerWidth}">${ledgers}</g>` +
+    accidentalOf(note, L.noteX - 17, L.noteY) +
     `<g class="note" data-note="${note}" transform="translate(${L.noteX} ${L.noteY})" fill="currentColor"><path fill-rule="evenodd" d="${WHOLE_NOTE}"/></g>` +
     `</svg>`
   );

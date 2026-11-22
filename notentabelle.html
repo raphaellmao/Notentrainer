@@ -32,7 +32,8 @@
   <div id="out"></div>
 </main>
 <script type="module">
-  import { CLEFS, levelNotes, helmholtzName, staffStep, ledgerSteps } from './js/notes.js';
+  import { CLEFS, levelNotes, helmholtzName, staffStep, ledgerSteps, isNatural, germanName } from './js/notes.js';
+  import { accidentalNotes } from './js/trainer.js';
   import { renderStaff } from './js/staff.js';
   import { keyboardLayout, renderKeyboard } from './js/keyboard.js';
 
@@ -52,6 +53,14 @@
         <figcaption><b>${helmholtzName(note)}</b><span>${position(staffStep(clef, note))}</span><span>${tag}</span></figcaption></figure>`;
     });
     out.insertAdjacentHTML('beforeend', `<h2>${CLEFS[clef].name}</h2><div class="grid">${figs.join('')}</div>`);
+  }
+
+  // Vorzeichen: Kreuz erhöht um einen Halbton (‑is), b erniedrigt (‑es; Ausnahmen Es, As und B = erniedrigtes H)
+  out.insertAdjacentHTML('beforeend', '<h2>Vorzeichen</h2><p>Ein Kreuz (♯) erhöht die Note um einen Halbton, der Name bekommt „‑is“. Ein b (♭) erniedrigt sie, der Name bekommt „‑es“ – Ausnahmen: Es, As und <b>B</b> (das erniedrigte H). Fis und Ges sind dieselbe schwarze Taste.</p>');
+  for (const clef of ['treble', 'bass']) {
+    const figs = accidentalNotes(clef).filter((n) => !isNatural(n)).map((note) =>
+      `<figure>${renderStaff(clef, note, { label: helmholtzName(note) })}<figcaption><b>${helmholtzName(note)}</b><span>${germanName(note)} · ${position(staffStep(clef, note))}</span></figcaption></figure>`);
+    out.insertAdjacentHTML('beforeend', `<h2>${CLEFS[clef].name} mit Vorzeichen</h2><div class="grid">${figs.join('')}</div>`);
   }
 
   out.insertAdjacentHTML('beforeend', '<h2>Klaviaturen</h2><p>Der graue Punkt markiert das mittlere C (c¹).</p>');

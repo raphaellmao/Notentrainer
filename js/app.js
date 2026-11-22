@@ -1,6 +1,6 @@
 // App: verbindet Notendarstellung, Klaviatur, Übungslogik und Klang mit der Oberfläche.
 
-import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote, midiNumber } from './notes.js';
+import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote, midiNumber, keyOf, asFlat } from './notes.js';
 import { Microphone } from './mic.js';
 import { SONGS } from './songs.js';
 import { layoutScore, renderScoreLine, parseMelody } from './score.js';
@@ -56,8 +56,8 @@ const ui = {
   otherSong: $('#other-song'),
 };
 
-const LEVELS = ['aufbau', 1, 2, 'folgen', 'lieder'];
-const parseLevel = (value) => (['aufbau', 'folgen', 'lieder'].includes(value) ? value : Number(value));
+const LEVELS = ['aufbau', 1, 2, 'vorzeichen', 'folgen', 'lieder'];
+const parseLevel = (value) => (['aufbau', 'vorzeichen', 'folgen', 'lieder'].includes(value) ? value : Number(value));
 const STATUS_TEXT = { sitzt: 'sitzt', wackelt: 'wackelt', ueben: 'üben', neu: 'noch nicht geübt' };
 const seconds = (ms) => (ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -300,8 +300,11 @@ function showFeedback(result, tapped) {
   const { correct, item } = result;
   let played = '';
   if (!correct) {
-    const sameLetter = parseNote(tapped).letter === parseNote(item.note).letter && !parseNote(tapped).sharp;
-    played = `<span class="played">${mic.active ? 'gespielt' : 'getippt'}: ${helmholtzName(tapped)}${sameLetter ? ' – falsche Oktave' : ''}</span>`;
+    // gleiche Taste, andere Oktave? (auch bei schwarzen Tasten, z. B. b¹ statt b²)
+    const octaveOff = (midiNumber(tapped) - midiNumber(item.note)) % 12 === 0;
+    // schwarze Taste so benennen, wie die Aufgabe geschrieben ist (b-Note → b-Name)
+    const shown = parseNote(item.note).flat ? asFlat(tapped) : tapped;
+    played = `<span class="played">${mic.active ? 'gespielt' : 'getippt'}: ${helmholtzName(shown)}${octaveOff ? ' – falsche Oktave' : ''}</span>`;
   }
   ui.feedback.className = `feedback ${correct ? 'right' : 'wrong'}`;
   ui.feedback.innerHTML =
@@ -454,7 +457,7 @@ function answer(tapped) {
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
   const result = trainer.answer(tapped, performance.now() - shownAt);
   marks = { [tapped]: result.correct ? 'right' : 'wrong' };
-  if (!result.correct) marks[result.item.note] = 'right';
+  if (!result.correct) marks[keyOf(result.item.note)] = 'right'; // b-Noten liegen auf der Taste mit Kreuz-Namen
   drawKeyboard();
   showFeedback(result, tapped);
   const { answered, total } = trainer.progress;

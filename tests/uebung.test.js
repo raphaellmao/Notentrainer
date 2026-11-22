@@ -322,3 +322,15 @@ test('Folgen: Runde mit 20 Noten = 4 Folgen, jede Note zählt einzeln', () => {
   assert.equal(sum.total, 20);
   assert.equal(sum.correct, 16);
 });
+
+import { accidentalNotes } from '../js/trainer.js';
+import { isNatural } from '../js/notes.js';
+
+test('Stufe „Vorzeichen“: Stammtöne plus Kreuz- und b-Noten, nur übliche Schreibweisen', () => {
+  const treble = accidentalNotes('treble');
+  assert.ok(treble.includes('F#4') && treble.includes('Gb4') && treble.includes('Bb4') && treble.includes('Eb5') && treble.includes('D4'));
+  for (const bad of ['E#4', 'B#4', 'Cb5', 'Fb4']) assert.ok(!treble.includes(bad), bad);
+  const withSign = treble.filter((n) => !isNatural(n)).length;
+  assert.ok(withSign / treble.length > 0.55, 'überwiegend Noten mit Zeichen');
+  assert.equal(buildPool('mixed', 'vorzeichen').length, treble.length + accidentalNotes('bass').length);
+});

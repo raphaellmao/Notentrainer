@@ -264,3 +264,60 @@ for (const clef of ['treble', 'bass']) {
     }
   });
 }
+
+// --- Vorzeichen: Kreuz und b ---
+
+import { parseNote, germanName, sameKey } from '../js/notes.js';
+import { Trainer } from '../js/trainer.js';
+
+// Note mit Vorzeichen sitzt dort, wo ihr Stammton sitzt; das Zeichen steht links davor auf gleicher Höhe.
+// Deutsche Namen von Hand: Kreuz = -is, b = -es (Ausnahmen: Es, As, B)
+const ACCIDENTAL_NAMES = {
+  C: ['Cis', 'Ces'], D: ['Dis', 'Des'], E: [null, 'Es'], F: ['Fis', null], G: ['Gis', 'Ges'], A: ['Ais', 'As'], B: [null, 'B'],
+};
+
+for (const clef of ['treble', 'bass']) {
+  test(`${CLEFS[clef].name}: Noten mit Kreuz und b sitzen an der Stelle ihres Stammtons`, () => {
+    let checked = 0;
+    for (const [natural, , desc] of REFERENCE[clef]) {
+      const { letter, octave } = parseNote(natural);
+      for (const [acc, i] of [['#', 0], ['b', 1]]) {
+        const name = ACCIDENTAL_NAMES[letter][i];
+        if (!name || name === 'Ces') continue; // Eis, His, Ces, Fes kommen nicht vor
+        const note = `${letter}${acc}${octave}`;
+        assert.equal(germanName(note), name, `${note} heißt ${name}`);
+        const svg = renderStaff(clef, note);
+        const s = parseStaff(svg);
+        const L = s.staff.map((l) => l.y1).sort((a, b) => b - a);
+        const exp = expected(desc, L, L[0] - L[1]);
+        close(s.note.y, exp.y, `${note} („${desc}“): Höhe wie ${natural}`);
+        assert.equal(s.ledgers.length, exp.ledgers.length, `${note}: Hilfslinien wie ${natural}`);
+        const accm = new RegExp(`<g class="accidental" data-acc="([#b])" transform="translate[(]${NUM} ${NUM}[)]`).exec(svg);
+        assert.ok(accm, `${note}: Vorzeichen gezeichnet`);
+        assert.equal(accm[1], acc, `${note}: richtiges Zeichen`);
+        close(+accm[3], s.note.y, `${note}: Zeichen auf Notenhöhe`);
+        assert.ok(+accm[2] < s.note.x - 10, `${note}: Zeichen links vor der Note`);
+        checked++;
+      }
+      assert.doesNotMatch(renderStaff(clef, natural), /class="accidental"/, `${natural}: Stammton ohne Zeichen`);
+    }
+    assert.ok(checked >= 18, `${checked} Vorzeichen-Noten geprüft`);
+  });
+
+  test(`${CLEFS[clef].name}: Kreuz und b treffen die schwarze Taste (Fis = Ges)`, () => {
+    const layout = keyboardLayout(CLEFS[clef].keyboard, 375, 200);
+    const pairs = clef === 'treble' ? [['F#4', 'Gb4'], ['C#5', 'Db5'], ['A#5', 'Bb5'], ['D#4', 'Eb4'], ['G#4', 'Ab4']] : [['F#2', 'Gb2'], ['A#3', 'Bb3'], ['C#3', 'Db3'], ['D#2', 'Eb2'], ['G#3', 'Ab3']];
+    for (const [sharp, flat] of pairs) {
+      assert.ok(sameKey(sharp, flat));
+      const key = keyForNote(layout, sharp);
+      assert.ok(key && key.black, `${sharp}: schwarze Taste`);
+      assert.equal(keyAt(layout, key.x + key.w / 2, 60), sharp);
+      const trainer = new Trainer();
+      trainer.configure(clef, 'vorzeichen');
+      trainer.current = { clef, note: flat };
+      assert.equal(trainer.answer(sharp, 900).correct, true, `${germanName(flat)} mit Taste ${sharp} ist richtig`);
+      trainer.current = { clef, note: flat };
+      assert.equal(trainer.answer(flat.replace('b', ''), 900).correct, false, `${germanName(flat)}: weiße Nachbartaste ist falsch`);
+    }
+  });
+}

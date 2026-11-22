@@ -1,7 +1,7 @@
 // Übungslogik: Notenvorrat, adaptive Auswahl, Statistik pro Note, Runden, Aufbau mit Leitnoten.
 // Ohne DOM; Speicher (localStorage) und Zufall werden hereingereicht.
 
-import { levelNotes, diatonicIndex } from './notes.js';
+import { levelNotes, diatonicIndex, parseNote, sameKey } from './notes.js';
 
 export const ROUND_LENGTH = 20;
 export const STATS_KEY = 'notentrainer.statistik.v1';
@@ -37,9 +37,22 @@ export function buildPool(mode, level, unlocked = {}) {
   if (level === 'lieder') return []; // Stufe 4: Noten kommen aus dem Lied (startSong)
   const notes = (clef) => {
     if (level === 'aufbau') return AUFBAU_ORDER[clef].slice(0, unlocked[clef] ?? AUFBAU_START);
+    if (level === 'vorzeichen') return accidentalNotes(clef);
     return levelNotes(clef, level === 'folgen' ? 2 : level);
   };
   return clefs.flatMap((clef) => notes(clef).map((note) => ({ clef, note })));
+}
+
+// Stufe „Vorzeichen“: Stammtöne von Stufe 1 und ihre Kreuz- und b-Varianten (übliche Schreibweisen
+// der schwarzen Tasten: Cis Dis Fis Gis Ais, Des Es Ges As B). Zwei Drittel der Noten tragen ein Zeichen.
+export function accidentalNotes(clef) {
+  return levelNotes(clef, 1).flatMap((natural) => {
+    const { letter, octave } = parseNote(natural);
+    const out = [natural];
+    if ('CDFGA'.includes(letter)) out.push(`${letter}#${octave}`);
+    if ('DEGAB'.includes(letter)) out.push(`${letter}b${octave}`);
+    return out;
+  });
 }
 
 // Eine Notenfolge wie eine kleine Melodie: alles in einem Schlüssel, kleine Schritte
@@ -240,7 +253,7 @@ export class Trainer {
   // tapped: Note der angetippten Taste (schwarze Tasten zählen immer als falsch)
   answer(tapped, ms) {
     const item = this.current;
-    const correct = tapped === item.note;
+    const correct = sameKey(tapped, item.note); // Fis und Ges sind dieselbe Taste
     recordAnswer(this.stats, item, correct, ms);
     saveStats(this.storage, this.stats);
     const unlocked = this.level === 'aufbau' ? this.unlockIfReady(item.clef) : [];
