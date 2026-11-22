@@ -125,6 +125,16 @@
       <p><a class="secondary" href="notentabelle.html">Alle Noten mit Namen ansehen (Lösung)</a></p>
       <div id="overview-list"></div>
       <p class="note-small">„Sitzt“ heißt: mindestens 3-mal geübt, zuletzt fast immer richtig und im Schnitt höchstens 3 Sekunden.</p>
+      <div class="backup">
+        <h3>Lernstand sichern</h3>
+        <p class="note-small">Statistik, Aufbau, Einstellungen (mit Einmessung) und importierte Lieder liegen nur in diesem Browser. Sichere sie ab und zu als Datei – zum Beispiel vor einem Handywechsel.</p>
+        <div class="import-actions">
+          <button type="button" class="primary" id="backup-save">Sichern</button>
+          <label class="secondary file-btn">Wiederherstellen<input type="file" id="backup-file" accept=".json,application/json" hidden></label>
+        </div>
+        <p id="backup-msg" aria-live="polite"></p>
+        <button type="button" class="link-btn" id="backup-undo" hidden>Letztes Wiederherstellen rückgängig machen</button>
+      </div>
       <button type="button" class="primary" id="overview-back">Zurück zur Übung</button>
     </section>
   </main>

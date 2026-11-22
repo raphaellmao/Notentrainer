@@ -334,3 +334,18 @@ test('Stufe „Vorzeichen“: Stammtöne plus Kreuz- und b-Noten, nur übliche S
   assert.ok(withSign / treble.length > 0.55, 'überwiegend Noten mit Zeichen');
   assert.equal(buildPool('mixed', 'vorzeichen').length, treble.length + accidentalNotes('bass').length);
 });
+
+import { accidentalOverview } from '../js/trainer.js';
+
+test('Übersicht: Vorzeichen-Noten mit eigenem Stand', () => {
+  const stats = {};
+  recordAnswer(stats, { clef: 'treble', note: 'Bb4' }, true, 1000);
+  recordAnswer(stats, { clef: 'treble', note: 'Bb4' }, false, 3000);
+  const ov = accidentalOverview('treble', stats);
+  assert.ok(ov.length >= 15 && ov.every((o) => /[#b]/.test(o.note) && !o.locked));
+  const b = ov.find((o) => o.note === 'Bb4');
+  assert.equal(b.attempts, 2);
+  assert.equal(b.rate, 0.5);
+  assert.equal(ov.find((o) => o.note === 'F#4').status, 'neu');
+  assert.ok(accidentalOverview('bass', {}).some((o) => o.note === 'Eb3'));
+});

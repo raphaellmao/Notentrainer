@@ -8,7 +8,8 @@ import { importAbc } from './abc.js';
 import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
 import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
-import { Trainer, noteOverview } from './trainer.js';
+import { Trainer, noteOverview, accidentalOverview } from './trainer.js';
+import { createBackup, backupFileName, parseBackup, restoreBackup, undoRestore, hasSafetyCopy } from './backup.js';
 import { Piano } from './audio.js';
 
 const SETTINGS_KEY = 'notentrainer.einstellungen.v1';
@@ -155,26 +156,93 @@ function showOverview() {
   ui.overviewList.innerHTML = ['treble', 'bass']
     .map((clef) => {
       const items = noteOverview(clef, trainer.stats, trainer.unlocked[clef]);
-      const count = (s) => items.filter((i) => i.status === s).length;
+      const count = (list, s) => list.filter((i) => i.status === s).length;
       const open = items.filter((i) => !i.locked).length;
-      const cards = items
-        .map((i) => {
-          const detail = i.attempts ? `${Math.round(i.rate * 100)} % · ${seconds(i.avgMs)} s` : i.locked ? 'Aufbau: noch gesperrt' : '–';
-          return (
-            `<figure class="ov ${i.status}${i.locked ? ' locked' : ''}">${renderStaff(clef, i.note, { label: `${helmholtzName(i.note)} im ${CLEFS[clef].name}` })}` +
-            `<figcaption><b>${helmholtzName(i.note)}</b><span class="st">${STATUS_TEXT[i.status]}</span><span>${detail}</span></figcaption></figure>`
-          );
-        })
-        .join('');
+      const cards = (list) =>
+        list
+          .map((i) => {
+            const detail = i.attempts ? `${Math.round(i.rate * 100)} % · ${seconds(i.avgMs)} s` : i.locked ? 'Aufbau: noch gesperrt' : '–';
+            return (
+              `<figure class="ov ${i.status}${i.locked ? ' locked' : ''}" data-note="${i.note}">${renderStaff(clef, i.note, { label: `${helmholtzName(i.note)} im ${CLEFS[clef].name}` })}` +
+              `<figcaption><b>${helmholtzName(i.note)}</b><span class="st">${STATUS_TEXT[i.status]}</span><span>${detail}</span></figcaption></figure>`
+            );
+          })
+          .join('');
+      // Noten mit Kreuz und b (Stufe „Vorzeichen“) – aufgeklappt, sobald welche geübt wurden
+      const acc = accidentalOverview(clef, trainer.stats);
+      const practiced = acc.filter((i) => i.attempts > 0).length;
       return (
         `<h3>${CLEFS[clef].name}</h3>` +
-        `<p class="ov-sum">${count('sitzt')} sitzen · ${count('wackelt')} wackeln · ${count('ueben')} üben · Aufbau: ${open} von ${items.length} frei</p>` +
-        `<div class="ov-grid">${cards}</div>`
+        `<p class="ov-sum">${count(items, 'sitzt')} sitzen · ${count(items, 'wackelt')} wackeln · ${count(items, 'ueben')} üben · Aufbau: ${open} von ${items.length} frei</p>` +
+        `<div class="ov-grid">${cards(items)}</div>` +
+        `<details class="ov-acc"${practiced ? ' open' : ''}><summary>Mit Vorzeichen (Kreuz und b) · ${practiced ? `${count(acc, 'sitzt')} sitzen · ${count(acc, 'wackelt')} wackeln · ${count(acc, 'ueben')} üben` : 'noch nicht geübt'}</summary>` +
+        `<div class="ov-grid">${cards(acc)}</div></details>`
       );
     })
     .join('');
+  $('#backup-undo').hidden = !(storage && hasSafetyCopy(storage));
   document.body.dataset.view = 'overview';
   document.querySelector('.overview').scrollTop = 0;
+}
+
+// --- Lernstand sichern und wiederherstellen ---
+
+function backupMessage(text, error = false) {
+  const el = $('#backup-msg');
+  el.textContent = text;
+  el.className = error ? 'import-error' : 'backup-ok';
+}
+
+async function saveBackup() {
+  if (!storage) return backupMessage('Der Browser-Speicher ist nicht verfügbar.', true);
+  const name = backupFileName();
+  const text = createBackup(storage);
+  const file = new File([text], name, { type: 'application/json' });
+  try {
+    // iPhone/Android: Teilen-Menü („In Dateien sichern“, Mail, Cloud …)
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Notentrainer – Lernstand' });
+      return backupMessage(`Gesichert als „${name}“.`);
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return backupMessage('Sichern abgebrochen.');
+  }
+  // sonst als Download
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  backupMessage(`Gesichert als „${name}“ (im Download-Ordner).`);
+}
+
+async function loadBackup(file) {
+  if (!storage) return backupMessage('Der Browser-Speicher ist nicht verfügbar.', true);
+  let parsed;
+  try {
+    parsed = parseBackup(await file.text());
+  } catch (err) {
+    return backupMessage(err.message, true);
+  }
+  const { summary, savedAt } = parsed;
+  const when = savedAt ? new Date(savedAt).toLocaleDateString('de-DE') : 'unbekanntem Datum';
+  const ok = window.confirm(
+    `Lernstand vom ${when} wiederherstellen?\n\n${summary.notes} Noten mit ${summary.attempts} Antworten, ${summary.songs} importierte Lieder.\n\n` +
+      'Dein jetziger Stand wird dadurch ersetzt. Eine Sicherheitskopie bleibt – du kannst es danach rückgängig machen.',
+  );
+  if (!ok) return backupMessage('Wiederherstellen abgebrochen – nichts geändert.');
+  restoreBackup(storage, parsed.data);
+  location.reload();
+}
+
+function undoBackup() {
+  if (!storage || !hasSafetyCopy(storage)) return;
+  if (!window.confirm('Den Stand von vor dem letzten Wiederherstellen zurückholen?')) return;
+  undoRestore(storage);
+  location.reload();
 }
 
 function closeOverview() {
@@ -635,6 +703,13 @@ ui.again.addEventListener('click', startRound);
 ui.micBtn.addEventListener('click', () => (mic.active ? stopMic() : startMic()));
 ui.overviewBtn.addEventListener('click', () => (document.body.dataset.view === 'overview' ? closeOverview() : showOverview()));
 ui.overviewBack.addEventListener('click', closeOverview);
+$('#backup-save').addEventListener('click', saveBackup);
+$('#backup-file').addEventListener('change', (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (file) loadBackup(file);
+});
+$('#backup-undo').addEventListener('click', undoBackup);
 // Einmessen: Knopf im Mikrofon-Hinweis (wird neu gezeichnet, daher über die Rückmeldung abgefangen)
 ui.feedback.addEventListener('click', (event) => {
   if (event.target.closest('[data-action="tune"]')) showTune();

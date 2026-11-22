@@ -24,6 +24,9 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
 - **Lieder importieren:** In der Liederliste „Lied importieren (ABC-Noten)“ – ABC-Text einfügen oder .abc-Datei wählen
   (`js/abc.js`). Unterstützt Tonarten inkl. Moll, Vorzeichen, Pausen, Haltebögen, Wiederholungen mit 1./2. Ende;
   Akkorde (oberste Note), Vorschläge und Triolen werden mit Hinweis vereinfacht. Importierte Lieder liegen im Browser.
+- **Lernstand sichern:** In der Übersicht (Balken-Symbol) „Sichern“ und „Wiederherstellen“ – eine Datei mit Statistik,
+  Aufbau, Einstellungen (inkl. Einmessung) und importierten Liedern (`js/backup.js`). Vor dem Wiederherstellen bleibt eine
+  Sicherheitskopie, das letzte Wiederherstellen lässt sich rückgängig machen.
 - **Nur Klavier:** Die Erkennung ignoriert Singen und Sprechen (weicher Einsatz bzw. schwankende Tonhöhe).
 
 ## Aufbau

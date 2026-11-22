@@ -102,6 +102,25 @@ export function noteOverview(clef, stats, unlockedCount = AUFBAU_START) {
   });
 }
 
+// Stand der Noten mit Kreuz bzw. b (Stufe „Vorzeichen“) für die Übersicht – ohne Sperre
+export function accidentalOverview(clef, stats) {
+  return accidentalNotes(clef)
+    .filter((note) => /[#b]/.test(note))
+    .map((note) => {
+      const s = stats[itemKey({ clef, note })];
+      const attempts = s?.attempts ?? 0;
+      return {
+        clef,
+        note,
+        status: mastery(s),
+        attempts,
+        rate: attempts ? (attempts - s.errors) / attempts : null,
+        avgMs: attempts ? s.totalMs / attempts : null,
+        locked: false,
+      };
+    });
+}
+
 // Gewicht einer Note für die Auswahl: oft falsch oder langsamer als der eigene
 // Durchschnitt → häufiger. avgMs ist die mittlere Antwortzeit über den Vorrat.
 export function noteWeight(stat, avgMs) {

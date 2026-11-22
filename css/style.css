@@ -537,3 +537,11 @@ body[data-view="songs"] .keys { display: none; }
 .import-ok { margin: 10px 0; text-align: left; }
 .import-ok ul { margin: 4px 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
 .import-error { color: var(--wrong); text-align: left; font-weight: 600; }
+
+/* --- Übersicht: Vorzeichen-Noten, Lernstand sichern --- */
+.ov-acc { margin: 10px auto 0; max-width: 760px; text-align: left; }
+.ov-acc summary { cursor: pointer; padding: 8px 4px; font-weight: 600; color: var(--muted); }
+.backup { max-width: 640px; margin: 22px auto 0; padding: 12px 14px; border-radius: 14px; background: var(--seg); text-align: left; }
+.backup h3 { margin: 0 0 4px; }
+.backup .note-small { margin: 0 0 10px; max-width: none; }
+.backup-ok { color: var(--right); font-weight: 600; }
