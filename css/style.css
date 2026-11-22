@@ -521,3 +521,19 @@ body[data-view="songs"] .keys { display: none; }
   .level-select select { min-height: 38px; font-size: 14px; }
   .progress-row { margin-top: -2px; }
 }
+
+/* --- Lieder importieren --- */
+.song-row { display: flex; gap: 6px; align-items: stretch; }
+.song-row .song-card { flex: 1 1 auto; min-width: 0; }
+.song-delete { flex: 0 0 auto; border: 0; border-radius: 14px; padding: 0 12px; background: var(--seg); color: var(--wrong); font-size: 14px; font-weight: 600; }
+.songs-sub { margin: 14px 0 2px; font-size: 15px; color: var(--muted); }
+.import { max-width: 640px; margin: 18px auto 0; padding: 10px 14px; border-radius: 14px; background: var(--seg); }
+.import summary { cursor: pointer; font-weight: 700; font-size: 16px; }
+.import .songs-help { text-align: left; margin: 10px 0; }
+.import textarea { width: 100%; padding: 10px; border: 1px solid var(--paper-edge); border-radius: 10px; background: var(--paper); color: #141414; font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace; -webkit-user-select: text; user-select: text; }
+.import-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.import-actions .primary { margin: 0; width: auto; padding: 0 22px; min-height: 46px; }
+.file-btn { display: inline-flex; align-items: center; min-height: 46px; margin: 0; cursor: pointer; background: var(--bg); }
+.import-ok { margin: 10px 0; text-align: left; }
+.import-ok ul { margin: 4px 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+.import-error { color: var(--wrong); text-align: left; font-weight: 600; }

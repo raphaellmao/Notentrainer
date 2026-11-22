@@ -194,3 +194,32 @@ test('Bruder Jakob in F-Dur: ein b am Zeilenanfang, die B-Noten ohne eigenes Zei
   assert.doesNotMatch(all, /<g class="accidental" /, 'keine Zeichen an den Noten');
   assert.ok(parseMelody(song.melody).flat().some((n) => n.note === 'Bb4'), 'enthält B');
 });
+
+// --- Pausen und Sechzehntel ---
+
+test('Pausen: Ganze hängt an der 4. Linie, Halbe liegt auf der Mittellinie, zählen nicht als Note', () => {
+  const song = { melody: 'C5q zq D5h | zw | E5h zh | F5s F5s G5e. A5q zq. B5s', time: [4, 4] };
+  const measures = parseMelody(song.melody);
+  measures.forEach((m) => assert.equal(m.reduce((s, n) => s + n.beats, 0), 4, 'Takt mit Pausen vollständig'));
+  const layout = layoutScore(song);
+  const svg = layout.lines.map((_, i) => renderScoreLine(layout, i)).join('');
+  const L1 = parseLine(renderScoreLine(layout, 0)).staff[0];
+  const line4 = L1 - 6 * 5;
+  const middle = L1 - 4 * 5;
+  const rest = (v) => new RegExp(`<g class="rest" data-value="${v.replace('.', '[.]')}" transform="translate[(][-0-9.]+ 0[)]" fill="currentColor"><path d="M-5 ([-0-9.]+)h10v5h-10Z"`).exec(svg);
+  assert.equal(+rest('w')[1], line4, 'ganze Pause hängt an der 4. Linie');
+  assert.equal(+rest('h')[1] + 5, middle, 'halbe Pause liegt auf der Mittellinie');
+  assert.equal([...svg.matchAll(/class="rest"/g)].length, 4);
+  assert.equal(parseMelody(song.melody).flat().filter((n) => !n.rest).map((n) => n.index).join(','), '0,1,2,3,4,5,6,7');
+  // Sechzehntel mit zwei Fähnchen, punktierte Achtel mit Punkt
+  const notes = layout.lines.flatMap((_, i) => parseLine(renderScoreLine(layout, i)).notes);
+  const f5 = notes.find((n) => n.value === 's');
+  assert.equal([...f5.body.matchAll(/class="flag"/g)].length, 2, 'Sechzehntel: zwei Fähnchen');
+  assert.match(notes.find((n) => n.value === 'e.').body, /class="dot"/);
+});
+
+test('Tonarten bis 7 Vorzeichen', () => {
+  assert.deepEqual(keySignatureNotes('treble', 'C#'), ['F5', 'C5', 'G5', 'D5', 'A4', 'E5', 'B4']);
+  assert.deepEqual(keySignatureNotes('treble', 'Cb'), ['B4', 'E5', 'A4', 'D5', 'G4', 'C5', 'F4']);
+  assert.deepEqual(Object.keys(keyAccidentals('B')), ['F', 'C', 'G', 'D', 'A']);
+});

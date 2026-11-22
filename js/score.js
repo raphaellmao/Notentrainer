@@ -11,7 +11,10 @@ import { GEOMETRY, SPACE, stepY, WHOLE_NOTE } from './staff.js';
 import { CLEF_SHAPES, accidentalSvg } from './clefs.js';
 
 // Tonarten: Anzahl Kreuze bzw. b. Reihenfolge der Zeichen: Kreuze F C G D A E H, b: B E A D G C F
-export const KEYS = { C: ['', 0], G: ['#', 1], D: ['#', 2], A: ['#', 3], E: ['#', 4], F: ['b', 1], Bb: ['b', 2], Eb: ['b', 3], Ab: ['b', 4] };
+export const KEYS = {
+  C: ['', 0], G: ['#', 1], D: ['#', 2], A: ['#', 3], E: ['#', 4], B: ['#', 5], 'F#': ['#', 6], 'C#': ['#', 7],
+  F: ['b', 1], Bb: ['b', 2], Eb: ['b', 3], Ab: ['b', 4], Db: ['b', 5], Gb: ['b', 6], Cb: ['b', 7],
+};
 const SHARP_ORDER = 'FCGDAEB';
 const FLAT_ORDER = 'BEADGCF';
 // Wo die Zeichen der Tonart im System stehen (übliche Lage)
@@ -41,6 +44,11 @@ export function accidentalsShown(measures, key = 'C') {
   for (const m of measures) {
     const inMeasure = new Map();
     for (const n of m) {
+      if (n.rest) continue;
+      if (n.tiedFrom) {
+        n.showAcc = null; // angebundene Note wiederholt kein Vorzeichen
+        continue;
+      }
       const { letter, octave, accidental } = parseNote(n.note);
       const id = `${letter}${octave}`;
       const expected = inMeasure.has(id) ? inMeasure.get(id) : fromKey[letter] ?? '';
@@ -51,7 +59,7 @@ export function accidentalsShown(measures, key = 'C') {
   return measures;
 }
 
-export const BEATS = { w: 4, h: 2, q: 1, e: 0.5 }; // in Vierteln
+export const BEATS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25 }; // in Vierteln (s = Sechzehntel)
 
 export const SCORE = {
   clefArea: 40,
@@ -63,24 +71,38 @@ export const SCORE = {
   stemLength: 35,
 };
 
-// "C4q." → { note: 'C4', value: 'q', dotted: true, beats: 1.5 }
+// "C4q." → { note: 'C4', value: 'q', dotted: true, beats: 1.5 }; Pausen: "zq", "zh." …
 export function parseToken(token) {
-  const m = /^([A-G](?:#|b)?[0-9])([whqe])(\.?)$/.exec(token);
+  const r = /^z([whqes])(\.?)$/.exec(token);
+  if (r) return { rest: true, value: r[1], dotted: r[2] === '.', beats: BEATS[r[1]] * (r[2] ? 1.5 : 1) };
+  const m = /^([A-G](?:#|b)?[0-9])([whqes])(\.?)(-?)$/.exec(token);
   if (!m) throw new Error(`Unbekannte Note im Lied: ${token}`);
-  const [, note, value, dot] = m;
+  const [, note, value, dot, tie] = m;
   parseNote(note); // prüft, ob es die Note gibt (kein Eis, Ces …)
-  return { note, value, dotted: dot === '.', beats: BEATS[value] * (dot ? 1.5 : 1) };
+  // "-" am Ende: Haltebogen zur nächsten Note (die wird dann nicht neu angeschlagen)
+  return { note, value, dotted: dot === '.', beats: BEATS[value] * (dot ? 1.5 : 1), tie: tie === '-' };
 }
 
-// Lied-Text → Takte mit Noten (jede Note mit fortlaufendem Index)
+// Lied-Text → Takte mit Noten (jede Note mit fortlaufendem Index; Pausen ohne Index)
 export function parseMelody(text) {
   let index = 0;
+  let last = null;
   return text
     .split('|')
     .map((bar) => bar.trim())
     .filter(Boolean)
-    .map((bar) => bar.split(/\s+/).map((t) => ({ ...parseToken(t), index: index++ })));
+    .map((bar) => bar.split(/\s+/).map((t) => {
+      const item = parseToken(t);
+      if (item.rest) return item;
+      // angebundene Note (gleiche Tonhöhe nach Haltebogen): gezeichnet, aber nicht gespielt
+      const tied = last?.tie && last.note === item.note;
+      last = item;
+      return tied ? { ...item, tiedFrom: true } : { ...item, index: index++ };
+    }));
 }
+
+// nur die zu spielenden (anzuschlagenden) Noten eines Lieds, in Reihenfolge
+export const songNotes = (song) => parseMelody(song.melody).flat().filter((n) => !n.rest && !n.tiedFrom);
 
 // Taktart → Länge eines Takts in Vierteln (6/8 = 3 Viertel)
 export const measureBeats = ([top, bottom]) => (top * 4) / bottom;
@@ -119,10 +141,16 @@ export function layoutScore(song) {
       const scale = last ? 1 : line.room / line.width; // volle Zeilen auf Breite ziehen
       let x = start;
       const notes = [];
+      const rests = [];
       const bars = [];
       for (const mi of line.measures) {
         let nx = x + SCORE.measurePad * scale;
         for (const n of measures[mi]) {
+          if (n.rest) {
+            rests.push({ ...n, measure: mi, x: +(nx + (advance(n) / 2 - 2) * scale).toFixed(2) });
+            nx += advance(n) * scale;
+            continue;
+          }
           const step = staffStep('treble', n.note);
           const x = nx + ((n.showAcc ? ACC_WIDTH : 0) + advance(n) / 2 - 2) * scale;
           notes.push({ ...n, measure: mi, step, x: +x.toFixed(2), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
@@ -131,7 +159,7 @@ export function layoutScore(song) {
         x += natural[mi] * scale;
         bars.push(x);
       }
-      return { index: li, first: li === 0, last, notes, bars };
+      return { index: li, first: li === 0, last, notes, rests, bars };
     }),
   };
 }
@@ -156,6 +184,36 @@ function flag(stemUp, end) {
   return `<path class="flag" d="M${x} ${y}C${x + 1} ${y + 7 * d} ${x + 9} ${y + 9 * d} ${x + 7} ${y + 21 * d}C${x + 8} ${y + 13 * d} ${x + 4} ${y + 10 * d} ${x} ${y + 9 * d}Z"/>`;
 }
 
+// Pausen (absolute Höhe im System): Ganze hängt an der 4. Linie, Halbe liegt auf der Mittellinie
+function restShape(r) {
+  const l4 = stepY(6);
+  const mid = stepY(4);
+  const shapes = {
+    w: `<path d="M-5 ${l4}h10v5h-10Z"/>`,
+    h: `<path d="M-5 ${mid - 5}h10v5h-10Z"/>`,
+    q: `<path d="M-2 ${mid - 15}L3.6 ${mid - 8.5}C1 ${mid - 6} 0.5 ${mid - 4} 3.6 ${mid + 0.5}L3 ${mid + 1}C0 ${mid - 0.5} -3 ${mid + 0.5} -1 ${mid + 4.5}C-4.2 ${mid + 2} -5.6 ${mid - 1.5} -0.6 ${mid - 2}L-3.2 ${mid - 6.5}C-0.6 ${mid - 8.5} 0 ${mid - 11} -2 ${mid - 15}Z"/>`,
+    e: `<circle cx="-2" cy="${mid - 5.5}" r="2"/><path d="M-2.6 ${mid - 3.7}C-0.6 ${mid - 3} 1.6 ${mid - 4} 3.2 ${mid - 7}L4 ${mid - 6.6}L0 ${mid + 7}H-1.4L2.4 ${mid - 4.2}C0.8 ${mid - 2.6} -1.2 ${mid - 2.2} -2.6 ${mid - 3.7}Z"/>`,
+    s: `<circle cx="-1" cy="${mid - 5.5}" r="2"/><circle cx="-2.6" cy="${mid - 0.5}" r="2"/><path d="M-1.6 ${mid - 3.7}C0.4 ${mid - 3} 2.6 ${mid - 4} 4.2 ${mid - 7}L5 ${mid - 6.6}L-0.4 ${mid + 12}H-1.8L1.6 ${mid}C0 ${mid + 1.4} -1.6 ${mid + 1.6} -3.2 ${mid + 1.3}L-3 ${mid + 0.6}C-1.2 ${mid + 0.9} 0.6 ${mid} 2.2 ${mid - 2.6}L3.2 ${mid - 4.2}C1.8 ${mid - 2.6} -0.2 ${mid - 2.2} -1.6 ${mid - 3.7}Z"/>`,
+  };
+  const dot = r.dotted ? `<circle class="dot" cx="7" cy="${stepY(5)}" r="1.5"/>` : '';
+  return shapes[r.value] + dot;
+}
+
+// Haltebögen zwischen angebundenen Noten derselben Zeile (unter den Köpfen bei Hals oben, sonst darüber)
+function tieArcs(notes) {
+  return notes
+    .map((n, k) => {
+      const prev = notes[k - 1];
+      if (!n.tiedFrom || !prev) return '';
+      const d = n.stemUp ? 1 : -1;
+      const x1 = prev.x + 4;
+      const x2 = n.x - 4;
+      const y = n.y + 6 * d;
+      return `<path class="tie" d="M${x1} ${y}Q${(x1 + x2) / 2} ${y + 7 * d} ${x2} ${y}Q${(x1 + x2) / 2} ${y + 5 * d} ${x1} ${y}Z" fill="currentColor"/>`;
+    })
+    .join('');
+}
+
 function noteShape(n) {
   const middle = stepY(4);
   const parts = [];
@@ -168,7 +226,8 @@ function noteShape(n) {
     const len = Math.max(SCORE.stemLength, n.stemUp ? n.y - middle : middle - n.y);
     stem = n.stemUp ? { x: STEM_X, y1: -1, y2: -1 - len } : { x: -STEM_X, y1: 1, y2: 1 + len };
     parts.push(`<line class="stem" x1="${stem.x}" y1="${stem.y1}" x2="${stem.x}" y2="${stem.y2}" stroke="currentColor" stroke-width="1.2"/>`);
-    if (n.value === 'e') parts.push(flag(n.stemUp, stem.y2));
+    if (n.value === 'e' || n.value === 's') parts.push(flag(n.stemUp, stem.y2));
+    if (n.value === 's') parts.push(flag(n.stemUp, stem.y2 + (n.stemUp ? 7 : -7))); // Sechzehntel: zwei Fähnchen
   }
   if (n.dotted) {
     // Punkt rechts neben dem Kopf, bei Noten auf einer Linie im Zwischenraum darüber
@@ -201,7 +260,7 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
   const notes = line.notes
     .map(
       (n) =>
-        `<g class="note${states[n.index] ? ` ${states[n.index]}` : ''}" data-note="${n.note}" data-index="${n.index}" data-value="${n.value}${n.dotted ? '.' : ''}" ` +
+        `<g class="note${n.tiedFrom ? ' tied' : ''}${states[n.index] ? ` ${states[n.index]}` : ''}" data-note="${n.note}" data-index="${n.index ?? ''}" data-value="${n.value}${n.dotted ? '.' : ''}" ` +
         `transform="translate(${n.x} ${n.y})" fill="currentColor">${noteShape(n)}</g>`,
     )
     .join('');
@@ -223,6 +282,8 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
     time +
     `<g class="ledger-lines" stroke="currentColor" stroke-width="${g.ledgerWidth}">${ledgers}</g>` +
     `<g class="bar-lines" stroke="currentColor">${bars}</g>` +
+    tieArcs(line.notes) +
+    line.rests.map((r) => `<g class="rest" data-value="${r.value}${r.dotted ? '.' : ''}" transform="translate(${r.x} 0)" fill="currentColor">${restShape(r)}</g>`).join('') +
     notes +
     `</svg>`
   );

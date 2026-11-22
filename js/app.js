@@ -3,7 +3,8 @@
 import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote, midiNumber, keyOf, asFlat } from './notes.js';
 import { Microphone } from './mic.js';
 import { SONGS } from './songs.js';
-import { layoutScore, renderScoreLine, parseMelody } from './score.js';
+import { layoutScore, renderScoreLine, parseMelody, songNotes } from './score.js';
+import { importAbc } from './abc.js';
 import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
 import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
@@ -22,6 +23,35 @@ const storage = (() => {
     return null; // z. B. Cookies/Speicher im Browser gesperrt
   }
 })();
+
+// Importierte Lieder (ABC) – im Browser gespeichert; ungültige Einträge werden übergangen
+const USER_SONGS_KEY = 'notentrainer.lieder.v1';
+let userSongs = loadUserSongs();
+function loadUserSongs() {
+  try {
+    const list = JSON.parse(storage?.getItem(USER_SONGS_KEY) || '[]');
+    return Array.isArray(list)
+      ? list.filter((s) => {
+          try {
+            return s && s.id && s.title && s.melody && parseMelody(s.melody).length > 0;
+          } catch {
+            return false;
+          }
+        })
+      : [];
+  } catch {
+    return [];
+  }
+}
+function saveUserSongs() {
+  try {
+    storage?.setItem(USER_SONGS_KEY, JSON.stringify(userSongs));
+    return true;
+  } catch {
+    return false;
+  }
+}
+const allSongs = () => [...SONGS, ...userSongs];
 
 const settings = loadSettings();
 const trainer = new Trainer({ storage });
@@ -79,7 +109,7 @@ function loadSettings() {
       sound: typeof saved.sound === 'boolean' ? saved.sound : fallback.sound,
       // gemessene Stimmung des Klaviers; nur plausible Werte (etwa ±1 Halbton um 440 Hz)
       refA: Number.isFinite(saved.refA) && saved.refA > 410 && saved.refA < 470 ? saved.refA : fallback.refA,
-      song: SONGS.some((x) => x.id === saved.song) ? saved.song : fallback.song,
+      song: allSongs().some((x) => x.id === saved.song) ? saved.song : fallback.song,
     };
   } catch {
     return fallback;
@@ -161,7 +191,7 @@ function startRound() {
   ui.songbar.hidden = settings.level !== 'lieder';
   ui.otherSong.hidden = settings.level !== 'lieder';
   if (settings.level === 'lieder') {
-    const song = SONGS.find((x) => x.id === settings.song);
+    const song = allSongs().find((x) => x.id === settings.song);
     if (!song) return showSongs();
     return startSong(song);
   }
@@ -178,14 +208,17 @@ let playbackUntil = 0; // während „Anhören“ zählt das Mikrofon nicht
 
 function showSongs() {
   clearTimeout(timer);
-  ui.songList.innerHTML = SONGS.map((song) => {
-    const notes = parseMelody(song.melody).flat();
+  const card = (song) => {
+    const notes = songNotes(song);
     const range = [...notes].sort((a, b) => frequency(a.note) - frequency(b.note));
+    const del = song.imported ? `<button type="button" class="song-delete" data-delete="${song.id}" aria-label="${escapeHtml(song.title)} entfernen">Entfernen</button>` : '';
     return (
-      `<button type="button" class="song-card" data-song="${song.id}"><b>${song.title}</b>` +
-      `<span>${song.origin}</span><span>${notes.length} Noten · ${helmholtzName(range[0].note)} bis ${helmholtzName(range[range.length - 1].note)} · ${song.time.join('/')}-Takt</span></button>`
+      `<div class="song-row"><button type="button" class="song-card" data-song="${song.id}"><b>${escapeHtml(song.title)}</b>` +
+      `<span>${escapeHtml(song.origin)}</span><span>${notes.length} Noten · ${helmholtzName(range[0].note)} bis ${helmholtzName(range[range.length - 1].note)} · ${song.time.join('/')}-Takt</span></button>${del}</div>`
     );
-  }).join('');
+  };
+  ui.songList.innerHTML =
+    SONGS.map(card).join('') + (userSongs.length ? `<h3 class="songs-sub">Importiert</h3>${userSongs.map(card).join('')}` : '');
   ui.songbar.hidden = true;
   setView('songs');
 }
@@ -193,13 +226,42 @@ function showSongs() {
 function startSong(song) {
   currentSong = song;
   songLayout = layoutScore(song);
-  trainer.startSong(parseMelody(song.melody).flat().map((n) => n.note));
+  trainer.startSong(songNotes(song).map((n) => n.note));
   seqStates = [];
   ui.songTitle.textContent = song.title;
   ui.songbar.hidden = false;
   setView('play');
   drawSequence(trainer.position);
   ready();
+}
+
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+
+// --- Lieder importieren (ABC) ---
+
+function runImport(text) {
+  const out = $('#import-result');
+  if (!text.trim()) {
+    out.innerHTML = '<p class="import-error">Bitte zuerst ABC-Text einfügen oder eine Datei wählen.</p>';
+    return;
+  }
+  const { tunes, errors } = importAbc(text);
+  for (const t of tunes) userSongs.push(t.song);
+  const saved = tunes.length ? saveUserSongs() : true;
+  const parts = tunes.map(({ song, warnings }) => {
+    const count = songNotes(song).length;
+    return (
+      `<div class="import-ok"><b>✓ ${escapeHtml(song.title)}</b> – ${count} Noten, ${song.time.join('/')}-Takt` +
+      (warnings.length ? `<ul>${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>` : '') +
+      `<button type="button" class="link-btn" data-song="${song.id}">Jetzt spielen</button></div>`
+    );
+  });
+  parts.push(...errors.map((e) => `<p class="import-error">✗ ${escapeHtml(e)}</p>`));
+  if (!saved) parts.push('<p class="import-error">Speichern im Browser nicht möglich – das Lied ist nur bis zum Schließen da.</p>');
+  out.innerHTML = parts.join('');
+  showSongs();
+  $('#import-panel').open = true;
 }
 
 // Melodie vorspielen (Tempo aus dem Lied, Viertel = 60/Tempo Sekunden)
@@ -212,7 +274,7 @@ async function playSong() {
   const quarter = 60 / currentSong.tempo;
   let t = 0.1;
   for (const n of parseMelody(currentSong.melody).flat()) {
-    piano.voice(frequency(n.note), t);
+    if (!n.rest && !n.tiedFrom) piano.voice(frequency(n.note), t); // Pausen und Haltebögen klingen nicht neu
     t += n.beats * quarter;
   }
   playbackUntil = performance.now() + t * 1000 + 800;
@@ -525,6 +587,18 @@ $('#level').addEventListener('change', (event) => {
 });
 
 ui.songList.addEventListener('click', (event) => {
+  const del = event.target.closest('[data-delete]');
+  if (del) {
+    const song = userSongs.find((x) => x.id === del.dataset.delete);
+    if (song && window.confirm(`„${song.title}“ aus dem Liederbuch entfernen?`)) {
+      userSongs = userSongs.filter((x) => x !== song);
+      saveUserSongs();
+      if (settings.song === song.id) settings.song = null;
+      saveSettings();
+      showSongs();
+    }
+    return;
+  }
   const card = event.target.closest('[data-song]');
   if (!card) return;
   settings.song = card.dataset.song;
@@ -532,6 +606,22 @@ ui.songList.addEventListener('click', (event) => {
   startRound();
 });
 $('#song-list-btn').addEventListener('click', showSongs);
+$('#import-run').addEventListener('click', () => runImport($('#import-text').value));
+$('#import-file').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  $('#import-text').value = text;
+  runImport(text);
+  event.target.value = '';
+});
+$('#import-result').addEventListener('click', (event) => {
+  const play = event.target.closest('[data-song]');
+  if (!play) return;
+  settings.song = play.dataset.song;
+  saveSettings();
+  startRound();
+});
 $('#song-listen').addEventListener('click', playSong);
 ui.otherSong.addEventListener('click', showSongs);
 

@@ -21,6 +21,9 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
   bei der Erkennung heraus – auch bei einem stark verstimmten Klavier.
 - **Vorzeichen:** Stufe „Vorzeichen“ mit Kreuz und b (deutsche Namen: Cis … Ais, Des Es Ges As B); Fis und Ges sind dieselbe
   Taste. Lieder können eine Tonart haben (`key` in `js/songs.js`), die Vorzeichen setzt der Notensatz nach den üblichen Regeln.
+- **Lieder importieren:** In der Liederliste „Lied importieren (ABC-Noten)“ – ABC-Text einfügen oder .abc-Datei wählen
+  (`js/abc.js`). Unterstützt Tonarten inkl. Moll, Vorzeichen, Pausen, Haltebögen, Wiederholungen mit 1./2. Ende;
+  Akkorde (oberste Note), Vorschläge und Triolen werden mit Hinweis vereinfacht. Importierte Lieder liegen im Browser.
 - **Nur Klavier:** Die Erkennung ignoriert Singen und Sprechen (weicher Einsatz bzw. schwankende Tonhöhe).
 
 ## Aufbau

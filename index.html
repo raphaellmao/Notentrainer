@@ -87,6 +87,16 @@
       <h2 id="songs-title">Lieder</h2>
       <p class="songs-help">Ganze Lieder Note für Note spielen. Alle Melodien sind gemeinfrei und stehen im Violinschlüssel (rechte Hand). Der Rhythmus wird angezeigt; gewertet wird, ob du die richtigen Tasten triffst.</p>
       <div class="song-list" id="song-list"></div>
+      <details class="import" id="import-panel">
+        <summary>Lied importieren (ABC-Noten)</summary>
+        <p class="songs-help">Freie Noten im ABC-Format gibt es zum Beispiel auf abcnotation.com oder thesession.org (Volksmusik). Dort beim Lied den ABC-Text kopieren und hier einfügen – oder eine .abc-Datei wählen. Bitte nur freie Lieder verwenden (Volkslieder, alte Melodien).</p>
+        <textarea id="import-text" rows="8" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="X:1&#10;T:Alle meine Entchen&#10;M:4/4&#10;L:1/4&#10;K:C&#10;CDEF|G2G2|AAAA|G4|]"></textarea>
+        <div class="import-actions">
+          <button type="button" class="primary" id="import-run">Importieren</button>
+          <label class="secondary file-btn">Datei wählen<input type="file" id="import-file" accept=".abc,.txt,text/plain" hidden></label>
+        </div>
+        <div id="import-result" aria-live="polite"></div>
+      </details>
     </section>
 
     <section class="tune" aria-labelledby="tune-title">
