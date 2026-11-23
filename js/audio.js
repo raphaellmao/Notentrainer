@@ -106,19 +106,27 @@ export class Piano {
   // Ein Anschlag: Grundton + Obertöne, die unterschiedlich schnell verklingen
   // Metronom-Klick zur Zeit at (AudioContext-Zeit in Sekunden); betont auf der Eins
   // bus: eigener Lautstärkeregler, damit sich vorausgeplante Klicks beim Stoppen abschalten lassen
+  // Kurzes Rauschen statt eines Tons: hat keine Tonhöhe, deshalb überdeckt es beim Spielen mit Mikrofon
+  // keine Klaviertöne (ein Rechteck-Ton tat das in der Simulation bei Noten genau auf dem Schlag).
   click(at, accent = false, bus = this.out) {
     const ctx = this.ctx;
     if (!ctx) return;
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    osc.frequency.value = accent ? 2000 : 1400;
+    if (!this.noise) {
+      const len = Math.ceil(ctx.sampleRate * 0.05);
+      this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = this.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.012));
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = accent ? 3200 : 2200;
+    band.Q.value = 0.9;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(accent ? 0.35 : 0.2, at + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
-    osc.connect(gain).connect(bus);
-    osc.start(at);
-    osc.stop(at + 0.06);
+    gain.gain.value = accent ? 4.5 : 3; // kurzer Impuls: braucht viel Pegel, der Begrenzer fängt Spitzen ab
+    src.connect(band).connect(gain).connect(bus);
+    src.start(at);
   }
 
   // Verzögerung bis zum Lautsprecher (ms) – damit Klick und erwarteter Zeitpunkt zusammenpassen

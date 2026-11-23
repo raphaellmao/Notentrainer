@@ -223,3 +223,54 @@ test('Tonarten bis 7 Vorzeichen', () => {
   assert.deepEqual(keySignatureNotes('treble', 'Cb'), ['B4', 'E5', 'A4', 'D5', 'G4', 'C5', 'F4']);
   assert.deepEqual(Object.keys(keyAccidentals('B')), ['F', 'C', 'G', 'D', 'A']);
 });
+
+import { parseLyrics, songNotes } from '../js/score.js';
+
+test('Liedtext: Silben werden wie in ABC getrennt', () => {
+  assert.deepEqual(parseLyrics('Al-le mei-ne Ent-chen'), ['Al-', 'le', 'mei-', 'ne', 'Ent-', 'chen']);
+  assert.deepEqual(parseLyrics('bin-den _ wie-der'), ['bin-', 'den', '', 'wie-', 'der']);
+  assert.deepEqual(parseLyrics('a * b'), ['a', '', 'b']);
+  assert.deepEqual(parseLyrics('  '), []);
+});
+
+test('Liedtext: im Liederbuch genau eine Silbe je angeschlagener Note', () => {
+  const withText = SONGS.filter((s) => s.lyrics);
+  assert.ok(withText.length >= 5);
+  for (const song of withText) assert.equal(parseLyrics(song.lyrics).length, songNotes(song).length, song.id);
+});
+
+test('Liedtext: steht unter der richtigen Note, mittig, und das Bild wird höher', () => {
+  const song = SONGS.find((s) => s.id === 'entchen');
+  const layout = layoutScore(song);
+  assert.equal(layout.lyrics, true);
+  assert.ok(layout.height > layoutScore({ ...song, lyrics: undefined }).height);
+  const svg = renderScoreLine(layout, 0);
+  assert.match(svg, new RegExp(`viewBox="0 0 ${layout.width} ${layout.height}"`));
+  const texts = [...svg.matchAll(/<text class="lyric" data-index="(\d+)" x="([\d.]+)" y="([\d.]+)">([^<]*)<\/text>/g)];
+  assert.ok(texts.length > 4);
+  for (const [, idx, x, y] of texts) {
+    const n = layout.lines[0].notes.find((m) => m.index === Number(idx));
+    assert.equal(Number(x), n.x);
+    assert.ok(Number(y) > 96, 'unter dem System und unter Hilfslinien');
+  }
+  assert.deepEqual(texts.slice(0, 4).map((t) => t[4]), ['Al-', 'le', 'mei-', 'ne']);
+});
+
+test('Liedtext: lange Silben schieben die Noten auseinander, nichts überlappt', () => {
+  for (const song of SONGS.filter((s) => s.lyrics)) {
+    const layout = layoutScore(song);
+    for (const line of layout.lines) {
+      const withText = line.notes.filter((n) => n.lyric);
+      for (let i = 1; i < withText.length; i++) {
+        const a = withText[i - 1], b = withText[i];
+        const half = (t) => (t.length * 8 * 0.52) / 2;
+        assert.ok(a.x + half(a.lyric) < b.x - half(b.lyric) + 0.5, `${song.id}: „${a.lyric}“/„${b.lyric}“`);
+      }
+    }
+  }
+});
+
+test('Liedtext: Sonderzeichen werden für SVG maskiert', () => {
+  const svg = renderScoreLine(layoutScore({ time: [4, 4], melody: 'C4w', lyrics: 'a<b' }), 0);
+  assert.match(svg, />a&lt;b</);
+});

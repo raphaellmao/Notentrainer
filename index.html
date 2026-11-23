@@ -89,7 +89,11 @@
       <div class="wrong-list" id="sum-wrong"></div>
       <p class="all-right" id="sum-all-right" hidden>Alles richtig – stark!</p>
       <p class="unlocked" id="sum-unlocked" hidden></p>
-      <p class="rhythm-sum" id="sum-rhythm" hidden></p>
+      <div class="rhythm-sum" id="sum-rhythm-box" hidden>
+        <p id="sum-rhythm"></p>
+        <p class="rhythm-hint" id="sum-rhythm-hint" hidden></p>
+        <button type="button" class="link-btn" data-action="sync">Takt-Abgleich</button>
+      </div>
       <button type="button" class="primary" id="again">Nochmal</button>
       <button type="button" class="secondary" id="other-song" hidden>Anderes Lied</button>
     </section>
@@ -98,6 +102,7 @@
       <h2 id="songs-title">Lieder</h2>
       <p class="songs-help">Ganze Lieder Note für Note spielen. Alle Melodien sind gemeinfrei und stehen im Violinschlüssel (rechte Hand). Der Rhythmus wird angezeigt; gewertet wird, ob du die richtigen Tasten triffst.</p>
       <div class="song-list" id="song-list"></div>
+      <p class="songs-help sync-link">„Im Takt spielen“ wertet zu früh oder zu spät, obwohl du im Takt warst? <button type="button" class="link-btn" data-action="sync">Takt-Abgleich</button></p>
       <details class="import" id="import-panel">
         <summary>Lied importieren (ABC-Noten)</summary>
         <p class="songs-help">Freie Noten im ABC-Format gibt es zum Beispiel auf abcnotation.com oder thesession.org (Volksmusik). Dort beim Lied den ABC-Text kopieren und hier einfügen – oder eine .abc-Datei wählen. Bitte nur freie Lieder verwenden (Volkslieder, alte Melodien).</p>
@@ -126,6 +131,21 @@
         <button type="button" class="secondary" id="tune-cancel">Abbrechen</button>
       </div>
       <p class="note-small" id="tune-current"></p>
+    </section>
+
+    <section class="sync" aria-labelledby="sync-title">
+      <h2 id="sync-title">Takt-Abgleich</h2>
+      <p class="tune-help">Handy-Lautsprecher, Bluetooth-Kopfhörer und Mikrofon sind ein wenig verzögert. Hier misst die App, wie viel, und rechnet es bei „Im Takt spielen“ heraus.</p>
+      <p class="tune-help">Nach vier Klicks zum Einzählen <b>tippe genau mit jedem Klick</b> auf die Fläche – 12-mal. Ist das Mikrofon an, kannst du stattdessen bei jedem Klick eine Taste am Klavier anschlagen.</p>
+      <button type="button" class="sync-pad" id="sync-pad">Start</button>
+      <p class="tune-count" id="sync-count" aria-live="polite">&nbsp;</p>
+      <div class="tune-result" id="sync-result" aria-live="polite" hidden></div>
+      <button type="button" class="primary" id="sync-save" disabled>Übernehmen</button>
+      <div class="tune-actions">
+        <button type="button" class="secondary" id="sync-reset">Auf 0 zurücksetzen</button>
+        <button type="button" class="secondary" id="sync-cancel">Schließen</button>
+      </div>
+      <p class="note-small" id="sync-current"></p>
     </section>
 
     <section class="overview" aria-labelledby="overview-title">

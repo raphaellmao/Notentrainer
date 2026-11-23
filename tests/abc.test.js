@@ -142,3 +142,26 @@ test('Triolen werden mit Hinweis gerundet, das Lied bleibt nutzbar', () => {
   assert.ok(warnings.some((w) => /Triolen/.test(w)));
   assert.equal(notes(song), 'C4 D4 E4 F4 G4 A4');
 });
+
+import { abcLyrics } from '../js/abc.js';
+import { parseLyrics } from '../js/score.js';
+
+test('ABC-Liedtext: w:-Zeilen werden übernommen und Silbe für Silbe unter die Noten gelegt', () => {
+  const abc = ['X:1', 'T:Entchen', 'M:4/4', 'L:1/4', 'K:C', 'CDEF|G2G2|', 'w:Al-le mei-ne Ent-chen', 'w:zwei-te Stro-phe gilt nicht', 'AAAA|G4|]', 'w:schwim-men auf dem See'].join('\n');
+  const { tunes } = importAbc(abc);
+  const song = tunes[0].song;
+  assert.deepEqual(parseLyrics(song.lyrics), ['Al-', 'le', 'mei-', 'ne', 'Ent-', 'chen', 'schwim-', 'men', 'auf', 'dem', 'See']);
+  assert.equal(parseLyrics(song.lyrics).length, songNotes(song).length);
+  assert.deepEqual(tunes[0].warnings, []);
+});
+
+test('ABC-Liedtext: ~ _ * und \- nach ABC-Regeln', () => {
+  const t = abcLyrics(['CDEF|', String.raw`w:a~b c_ * x\-y`]);
+  assert.deepEqual(parseLyrics(t), ['a b', 'c', '', '', 'x‐y']);
+});
+
+test('ABC-Liedtext: passt die Silbenzahl nicht, wird er mit Hinweis weggelassen', () => {
+  const { tunes } = importAbc(['X:1', 'T:Kurz', 'M:4/4', 'L:1/4', 'K:C', 'CDEF|G4|]', 'w:nur drei Sil-ben'].join('\n'));
+  assert.equal(tunes[0].song.lyrics, undefined);
+  assert.ok(tunes[0].warnings.some((w) => /Liedtext weggelassen: 4 Silben für 5 Noten/.test(w)), tunes[0].warnings.join());
+});

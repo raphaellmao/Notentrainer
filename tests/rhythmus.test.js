@@ -66,3 +66,51 @@ test('Zusammenfassung', () => {
   ]);
   assert.deepEqual(r, { total: 4, ok: 1, early: 1, late: 1, missed: 1, avgAbsMs: 173 });
 });
+
+import { estimateOffset, cleanOffsets, systematicShift, SYNC } from '../js/rhythm.js';
+
+test('Takt-Abgleich: gleichmäßig 120 ms zu spät → Verzögerung 120 ms, gleichmäßig', () => {
+  const clicks = Array.from({ length: 12 }, (_, k) => 1000 + k * 600);
+  const jitter = [5, -8, 12, -3, 0, 7, -10, 4, -6, 9, -2, 3];
+  const r = estimateOffset(clicks.map((c, k) => c + 120 + jitter[k]), clicks, 600);
+  assert.equal(r.count, 12);
+  assert.ok(Math.abs(r.offset - 121) <= 2, String(r.offset));
+  assert.ok(r.steady && r.spread < 10);
+});
+
+test('Takt-Abgleich: Ausreißer, Doppeltipper und Tipps beim Einzählen verfälschen nichts', () => {
+  const clicks = Array.from({ length: 12 }, (_, k) => 3000 + k * 600);
+  const taps = clicks.map((c) => c - 40);
+  taps.push(1000, 1600, 2200); // beim Einzählen (keine gemessenen Klicks) – zu weit weg
+  taps.push(clicks[3] + 200); // Doppeltipper: zählt nicht, der nähere gewinnt
+  taps[5] = clicks[5] + 250; // ein Ausreißer
+  const r = estimateOffset(taps, clicks, 600);
+  assert.equal(r.offset, -40);
+  assert.equal(r.count, 12);
+});
+
+test('Takt-Abgleich: zu wenige Tipps → kein Ergebnis; Unregelmäßigkeit wird erkannt; Grenze ±300 ms', () => {
+  const clicks = Array.from({ length: 12 }, (_, k) => k * 600);
+  assert.equal(estimateOffset(clicks.slice(0, SYNC.min - 1).map((c) => c + 50), clicks, 600), null);
+  const wild = estimateOffset(clicks.map((c, k) => c + (k % 2 ? 160 : -120)), clicks, 600);
+  assert.equal(wild.steady, false);
+  const slow = Array.from({ length: 12 }, (_, k) => k * 1000); // langsamer Klick, damit 330 ms noch eindeutig sind
+  const far = estimateOffset(slow.map((c) => c + 330), slow, 1000);
+  assert.equal(far.offset, 300);
+});
+
+test('Takt-Abgleich: gespeicherte Werte werden geprüft', () => {
+  assert.deepEqual(cleanOffsets({ touch: 80.4, mic: -999 }), { touch: 80, mic: 0 });
+  assert.deepEqual(cleanOffsets(null), { touch: 0, mic: 0 });
+  assert.deepEqual(cleanOffsets({ touch: 'x', mic: 150 }), { touch: 0, mic: 150 });
+});
+
+test('Hinweis auf Verzögerung nur bei gleichmäßiger Verschiebung', () => {
+  const late = Array.from({ length: 10 }, (_, k) => ({ timing: 'late', delta: 150 + (k % 3) * 10 }));
+  assert.equal(systematicShift(late, 600), 160);
+  const mixed = Array.from({ length: 10 }, (_, k) => ({ timing: 'ok', delta: k % 2 ? 120 : -110 }));
+  assert.equal(systematicShift(mixed, 600), 0);
+  const fine = Array.from({ length: 10 }, () => ({ timing: 'ok', delta: 30 }));
+  assert.equal(systematicShift(fine, 600), 0);
+  assert.equal(systematicShift(late.slice(0, 4), 600), 0);
+});

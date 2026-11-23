@@ -4,11 +4,12 @@
 //
 // Unterstützt: Kopf T: M: L: K: Q: C: (mehrere Lieder je Datei über X:), Noten mit Oktavzeichen ' und ,,
 // Vorzeichen ^ _ = (gelten bis zum Taktstrich), Notenlängen (2, /2, 3/2 …), punktierter Rhythmus > <,
-// Pausen z/x/Z, Haltebögen, Wiederholungen |: :| mit 1./2. Ende.
+// Pausen z/x/Z, Haltebögen, Wiederholungen |: :| mit 1./2. Ende, Liedtext aus „w:“-Zeilen (1. Strophe).
+// Der Text wird nur übernommen, wenn die Silben genau auf die Noten aufgehen – sonst Hinweis.
 // Vereinfacht (mit Hinweis): Akkorde → oberste Note, Vorschlagsnoten werden ausgelassen, Triolen angenähert.
 
 import { midiNumber, noteFromMidi, asFlat, parseNote } from './notes.js';
-import { KEYS, parseMelody } from './score.js';
+import { KEYS, parseMelody, parseLyrics, songNotes } from './score.js';
 
 const LOW = 60; // c¹ – Bereich der Violin-Klaviatur
 const HIGH = 84; // c³
@@ -329,7 +330,38 @@ function parseTune(lines) {
     imported: true,
   };
   parseMelody(song.melody); // prüft das Ergebnis
+  const lyrics = abcLyrics(lines.slice(bodyStart));
+  if (lyrics) {
+    const syllables = parseLyrics(lyrics).length;
+    const notes = songNotes(song).length;
+    if (syllables === notes) song.lyrics = lyrics;
+    else warnings.add(`Liedtext weggelassen: ${syllables} Silben für ${notes} Noten`);
+  }
   return { song, warnings: [...warnings] };
+}
+
+// Liedtext: je Notenzeile die erste folgende „w:“-Zeile (= 1. Strophe), in die Schreibweise von songs.js
+// übersetzt: "~" verbindet Wörter unter einer Note, "\-" ist ein echter Bindestrich, "|" (Sprung zum
+// nächsten Takt) wird ignoriert, "_" darf direkt an der Silbe hängen.
+export function abcLyrics(lines) {
+  const parts = [];
+  let fresh = false;
+  for (const l of lines) {
+    if (/^w:/.test(l)) {
+      if (fresh) parts.push(l.slice(2));
+      fresh = false;
+    } else if (l && !/^[A-Za-z]:/.test(l) && !/^%/.test(l)) fresh = true;
+  }
+  if (!parts.length) return null;
+  const text = parts
+    .join(' ')
+    .replace(/\\-/g, '‐')
+    .replace(/~/g, ' ')
+    .replace(/\|/g, ' ')
+    .replace(/_/g, ' _ ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+  return text || null;
 }
 
 // ABC-Text (eine oder mehrere Lieder) → { tunes: [{ song, warnings }], errors: [string] }

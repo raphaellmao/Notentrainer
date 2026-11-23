@@ -5,7 +5,7 @@ import { Microphone } from './mic.js';
 import { SONGS } from './songs.js';
 import { layoutScore, renderScoreLine, parseMelody, songNotes } from './score.js';
 import { importAbc } from './abc.js';
-import { schedule, judge, missedAfter, summarizeRhythm, TIMING_TEXT } from './rhythm.js';
+import { schedule, judge, missedAfter, summarizeRhythm, TIMING_TEXT, SYNC, estimateOffset, cleanOffsets, systematicShift } from './rhythm.js';
 import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
 import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
@@ -55,6 +55,9 @@ function saveUserSongs() {
 }
 const allSongs = () => [...SONGS, ...userSongs];
 
+// Muss vor loadSettings() stehen: Stand es dahinter, scheiterte das Laden still (const noch nicht
+// angelegt) und die App startete bis Version 1.9.0 immer mit den Standard-Einstellungen.
+const LEVELS = ['aufbau', 1, 2, 'vorzeichen', 'folgen', 'lieder'];
 const settings = loadSettings();
 const trainer = new Trainer({ storage });
 const piano = new Piano();
@@ -82,6 +85,8 @@ const ui = {
   toast: $('#toast'),
   micBtn: $('#mic-btn'),
   sumRhythm: $('#sum-rhythm'),
+  sumRhythmBox: $('#sum-rhythm-box'),
+  sumRhythmHint: $('#sum-rhythm-hint'),
   rhythmBtn: $('#rhythm-btn'),
   rhythmTempo: $('#rhythm-tempo'),
   songbar: $('#songbar'),
@@ -91,7 +96,6 @@ const ui = {
   otherSong: $('#other-song'),
 };
 
-const LEVELS = ['aufbau', 1, 2, 'vorzeichen', 'folgen', 'lieder'];
 const parseLevel = (value) => (['aufbau', 'vorzeichen', 'folgen', 'lieder'].includes(value) ? value : Number(value));
 const STATUS_TEXT = { sitzt: 'sitzt', wackelt: 'wackelt', ueben: 'üben', neu: 'noch nicht geübt' };
 const seconds = (ms) => (ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -105,7 +109,7 @@ let toastTimer = 0;
 let viewBeforeOverview = 'play';
 
 function loadSettings() {
-  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null, rhythmTempo: 0.8 };
+  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null, rhythmTempo: 0.8, rhythmOffset: { touch: 0, mic: 0 } };
   try {
     const saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}');
     return {
@@ -116,6 +120,8 @@ function loadSettings() {
       refA: Number.isFinite(saved.refA) && saved.refA > 410 && saved.refA < 470 ? saved.refA : fallback.refA,
       song: allSongs().some((x) => x.id === saved.song) ? saved.song : fallback.song,
       rhythmTempo: [0.6, 0.8, 1].includes(saved.rhythmTempo) ? saved.rhythmTempo : fallback.rhythmTempo,
+      // Takt-Abgleich: gemessene Verzögerung beim Tippen bzw. über das Mikrofon (ms)
+      rhythmOffset: cleanOffsets(saved.rhythmOffset),
     };
   } catch {
     return fallback;
@@ -140,7 +146,7 @@ function syncControls() {
 }
 
 // Während die Übersicht offen ist, merkt sich die App nur, wohin es danach zurückgeht.
-const OVERLAYS = ['overview', 'tune'];
+const OVERLAYS = ['overview', 'tune', 'sync'];
 function setView(view) {
   if (OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = view;
   else document.body.dataset.view = view;
@@ -415,15 +421,16 @@ function advanceRhythm(done) {
   drawSequence(trainer.position);
 }
 
-function answerInRhythm(tapped, at) {
+function answerInRhythm(tapped, at, source) {
   const note = rhythm.sched.notes[trainer.position];
   if (!note) return;
-  const delta = at - rhythm.startPerf - note.at;
+  // gemessene Verzögerung von Lautsprecher, Bildschirm bzw. Mikrofon herausrechnen (Takt-Abgleich)
+  const delta = at - rhythm.startPerf - note.at - (settings.rhythmOffset[source] ?? 0);
   if (delta < -rhythm.sched.beatMs * 1.5) return; // noch beim Einzählen: ignorieren
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
   const timing = judge(delta, rhythm.sched.quarterMs);
   const result = trainer.answer(tapped, 1000);
-  rhythm.results.push({ timing, delta, correct: result.correct });
+  rhythm.results.push({ timing, delta, correct: result.correct, source });
   seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
   marks = { [tapped]: result.correct ? 'right' : 'wrong' };
   if (!result.correct) marks[keyOf(result.item.note)] = 'right';
@@ -445,7 +452,7 @@ function answerInRhythm(tapped, at) {
 
 function finishRhythm() {
   if (!rhythm) return;
-  lastRhythm = summarizeRhythm(rhythm.results);
+  lastRhythm = { ...summarizeRhythm(rhythm.results), shift: systematicShift(rhythm.results, rhythm.sched.quarterMs) };
   stopRhythm();
   locked = true;
   timer = setTimeout(showSummary, 900);
@@ -577,8 +584,9 @@ function showFeedback(result, tapped) {
 
 const mic = new Microphone({
   onNote: (midi, at) => {
+    if (document.body.dataset.view === 'sync') return syncTap(at, 'mic');
     if (locked || !trainer.current || document.body.dataset.view !== 'play' || performance.now() < playbackUntil) return;
-    answer(noteFromMidi(midi), at);
+    answer(noteFromMidi(midi), at, 'mic');
   },
   // Pegel + live gehörte Note anzeigen; nach 8 s Stille einen Hinweis geben
   onLevel: (level, heardMidi) => {
@@ -684,6 +692,139 @@ function saveTuning(refA) {
   showToast(refA === 440 ? 'Zurückgesetzt auf a¹ = 440 Hz' : `Eingemessen: a¹ ≈ ${refA.toFixed(1)} Hz`);
 }
 
+// --- Takt-Abgleich ---
+let sync = null; // läuft bzw. lief: { beatMs, measured, taps: { touch, mic }, timers, bus, done }
+let syncResult = null;
+const msText = (ms) => (ms === 0 ? '0 ms' : `${ms > 0 ? '+' : '−'}${Math.abs(ms)} ms`);
+
+function showSync() {
+  stopRhythm();
+  clearTimeout(timer);
+  if (!OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = document.body.dataset.view;
+  document.body.dataset.view = 'sync';
+  resetSync();
+}
+
+function resetSync() {
+  stopSync();
+  sync = null;
+  syncResult = null;
+  const pad = $('#sync-pad');
+  pad.textContent = 'Start';
+  pad.classList.remove('running');
+  $('#sync-count').innerHTML = mic.active ? 'Mikrofon ist an – du kannst auch am Klavier spielen.' : '&nbsp;';
+  $('#sync-result').hidden = true;
+  $('#sync-save').disabled = true;
+  const o = settings.rhythmOffset;
+  $('#sync-current').textContent = `Bisher: Tippen ${msText(o.touch)} · Mikrofon ${msText(o.mic)}`;
+}
+
+async function startSync() {
+  stopSync();
+  piano.unlock();
+  if (piano.ctx && piano.ctx.state !== 'running') await piano.ctx.resume().catch(() => {});
+  if (!piano.ctx || piano.ctx.state !== 'running') {
+    showToast('Ohne Ton geht der Abgleich nicht – bitte nochmal antippen.');
+    return;
+  }
+  const beatMs = 60000 / SYNC.tempo;
+  const total = SYNC.countIn + SYNC.beats;
+  const leadMs = 400;
+  const perfNow = performance.now();
+  // Klicks so planen wie bei „Im Takt spielen“ (gemeldete Lautsprecher-Verzögerung schon eingerechnet)
+  const first = perfNow + leadMs + piano.latencyMs;
+  const clicks = Array.from({ length: total }, (_, k) => first + k * beatMs);
+  sync = { beatMs, measured: clicks.slice(SYNC.countIn), taps: { touch: [], mic: [] }, timers: [], bus: piano.ctx.createGain(), done: false };
+  document.body.dataset.syncStart = String(sync.measured[0]); // für Tests: erster gemessener Klick
+  sync.bus.connect(piano.out);
+  const audioStart = piano.ctx.currentTime + leadMs / 1000;
+  for (let k = 0; k < total; k++) piano.click(audioStart + (k * beatMs) / 1000, k % 4 === 0, sync.bus);
+  const pad = $('#sync-pad');
+  pad.classList.add('running');
+  pad.textContent = 'Hör zu …';
+  $('#sync-count').textContent = 'Einzählen …';
+  $('#sync-result').hidden = true;
+  $('#sync-save').disabled = true;
+  clicks.forEach((at, k) => {
+    sync.timers.push(
+      setTimeout(() => {
+        pad.textContent = k < SYNC.countIn ? `${k + 1}` : 'Tippen!';
+        $('#sync-count').textContent = k < SYNC.countIn ? 'Einzählen …' : `Klick ${k - SYNC.countIn + 1} von ${SYNC.beats}`;
+        pad.classList.remove('beat');
+        void pad.offsetWidth; // Animation neu starten
+        pad.classList.add('beat');
+      }, at - perfNow),
+    );
+  });
+  sync.timers.push(setTimeout(finishSync, clicks[total - 1] - perfNow + beatMs * 0.6));
+}
+
+function syncTap(at, source) {
+  if (!sync || sync.done) return;
+  sync.taps[source].push(at);
+  const pad = $('#sync-pad');
+  pad.classList.add('hit');
+  setTimeout(() => pad.classList.remove('hit'), 90);
+}
+
+function finishSync() {
+  if (!sync) return;
+  sync.done = true;
+  const pad = $('#sync-pad');
+  pad.classList.remove('running');
+  pad.textContent = 'Nochmal';
+  const results = { touch: estimateOffset(sync.taps.touch, sync.measured, sync.beatMs), mic: estimateOffset(sync.taps.mic, sync.measured, sync.beatMs) };
+  const label = { touch: 'Tippen', mic: 'Klavier über Mikrofon' };
+  const lines = [];
+  syncResult = {};
+  for (const source of ['touch', 'mic']) {
+    const r = results[source];
+    if (!r) continue;
+    const when = r.offset === 0 ? 'genau mit dem Klick' : `etwa ${Math.abs(r.offset)} ms ${r.offset > 0 ? 'nach' : 'vor'} dem Klick`;
+    if (r.steady) {
+      syncResult[source] = r.offset;
+      lines.push(`<b>${label[source]}:</b> ${when} (gleichmäßig, ${r.count} Treffer). Wird bei „Im Takt spielen“ herausgerechnet.`);
+    } else {
+      lines.push(`<b>${label[source]}:</b> ${when}, aber ungleichmäßig (etwa ±${r.spread} ms). Bitte nochmal – möglichst genau mit jedem Klick.`);
+    }
+  }
+  if (!lines.length) lines.push('Zu wenige Tipps erkannt. Bitte nochmal und bei jedem Klick tippen (mindestens 6-mal).');
+  $('#sync-count').textContent = 'Fertig';
+  $('#sync-result').innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
+  $('#sync-result').hidden = false;
+  $('#sync-save').disabled = Object.keys(syncResult).length === 0;
+  document.body.dataset.syncDone = JSON.stringify(results); // für Tests
+}
+
+function stopSync() {
+  if (!sync) return;
+  sync.timers.forEach(clearTimeout);
+  sync.bus?.disconnect();
+  sync.done = true;
+  delete document.body.dataset.syncStart;
+}
+
+function saveSync() {
+  if (!syncResult) return;
+  settings.rhythmOffset = { ...settings.rhythmOffset, ...syncResult };
+  saveSettings();
+  const o = settings.rhythmOffset;
+  closeSync();
+  showToast(`Takt-Abgleich gespeichert: Tippen ${msText(o.touch)} · Mikrofon ${msText(o.mic)}`);
+}
+
+function closeSync() {
+  stopSync();
+  sync = null;
+  delete document.body.dataset.syncDone;
+  document.body.dataset.view = viewBeforeOverview;
+  if (viewBeforeOverview === 'play') {
+    drawKeyboard();
+    if (!locked) shownAt = performance.now();
+    showFeedback(null);
+  }
+}
+
 async function startMic() {
   ui.micBtn.disabled = true;
   try {
@@ -711,8 +852,8 @@ function syncMic() {
   if (!locked && document.body.dataset.view === 'play') showFeedback(null);
 }
 
-function answer(tapped, at = performance.now()) {
-  if (rhythm) return answerInRhythm(tapped, at);
+function answer(tapped, at = performance.now(), source = 'touch') {
+  if (rhythm) return answerInRhythm(tapped, at, source);
   locked = true;
   // im Mikrofon-Modus kein eigener Ton – sonst hört sich die App selbst
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
@@ -739,9 +880,13 @@ function answer(tapped, at = performance.now()) {
 function showSummary() {
   const s = trainer.summary();
   const rhythmRun = lastRhythm; // bei „Im Takt“ gibt das Tempo die Zeit vor – Antwortzeit ohne Aussage
-  ui.sumRhythm.hidden = !lastRhythm;
+  ui.sumRhythmBox.hidden = !lastRhythm;
   if (lastRhythm) {
     const r = lastRhythm;
+    ui.sumRhythmHint.hidden = !r.shift;
+    ui.sumRhythmHint.textContent = r.shift
+      ? `Fast alles war etwa ${Math.abs(r.shift)} ms ${r.shift > 0 ? 'zu spät' : 'zu früh'} – oft liegt das an der Verzögerung von Handy, Kopfhörer oder Mikrofon. Ein Takt-Abgleich rechnet sie heraus.`
+      : '';
     ui.sumRhythm.textContent =
       `Im Takt: ${r.ok} von ${r.total} · ${r.early} zu früh · ${r.late} zu spät · ${r.missed} verpasst` +
       (r.total - r.missed ? ` · Abweichung im Schnitt ${r.avgAbsMs} ms` : '');
@@ -870,6 +1015,29 @@ ui.feedback.addEventListener('click', (event) => {
 $('#tune-save').addEventListener('click', () => tuneResult && saveTuning(tuneResult.refA));
 $('#tune-reset').addEventListener('click', () => saveTuning(440));
 $('#tune-cancel').addEventListener('click', closeTune);
+// Takt-Abgleich: Knöpfe in der Auswertung und in der Liederliste
+document.addEventListener('click', (event) => {
+  if (event.target.closest('[data-action="sync"]')) showSync();
+});
+// Tipps zählen schon beim Berühren (pointerdown, zeitgenau); gestartet wird per click, weil Handys
+// den Ton erst nach dem Loslassen freigeben
+$('#sync-pad').addEventListener('pointerdown', (event) => {
+  if (sync && !sync.done) {
+    event.preventDefault();
+    syncTap(event.timeStamp || performance.now(), 'touch');
+  }
+});
+$('#sync-pad').addEventListener('click', () => {
+  if (!sync || sync.done) startSync();
+});
+$('#sync-save').addEventListener('click', saveSync);
+$('#sync-reset').addEventListener('click', () => {
+  settings.rhythmOffset = { touch: 0, mic: 0 };
+  saveSettings();
+  closeSync();
+  showToast('Takt-Abgleich zurückgesetzt');
+});
+$('#sync-cancel').addEventListener('click', closeSync);
 
 // Ton erst nach einer Nutzeraktion freischalten (Vorgabe der Handy-Browser)
 for (const type of ['pointerup', 'touchend', 'click', 'keydown']) {

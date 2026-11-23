@@ -109,12 +109,31 @@ export const measureBeats = ([top, bottom]) => (top * 4) / bottom;
 
 const advance = (n) => Math.max(19, 14 + 4 * n.beats); // horizontaler Platz einer Note
 const ACC_WIDTH = 9; // zusätzlicher Platz für ein Zeichen vor der Note
-const widthOf = (n) => advance(n) + (n.showAcc ? ACC_WIDTH : 0);
+const LYRIC_SIZE = 8; // Schriftgröße des Liedtexts (ein Linienabstand = 10)
+const lyricWidth = (text) => (text ? text.length * LYRIC_SIZE * 0.52 + 4 : 0);
+const widthOf = (n) => Math.max(advance(n), lyricWidth(n.lyric)) + (n.showAcc ? ACC_WIDTH : 0);
+
+// Liedtext → eine Silbe je angeschlagener Note. Schreibweise wie in ABC („w:“):
+// Silben mit Leerzeichen oder Bindestrich trennen ("Al-le mei-ne"), "_" = vorige Silbe wird
+// weitergesungen (keine neue Silbe auf dieser Note), "*" = Note ohne Text.
+export function parseLyrics(text = '') {
+  const out = [];
+  for (const word of text.trim().split(/[ \t\n]+/).filter(Boolean)) { // geschütztes Leerzeichen hält Wörter unter einer Note zusammen
+    const parts = word.split('-');
+    parts.forEach((p, i) => {
+      if (p === '_' || p === '*') out.push('');
+      else if (p !== '') out.push(i < parts.length - 1 ? `${p}-` : p);
+    });
+  }
+  return out;
+}
 const keySigWidth = (key) => (KEYS[key ?? 'C'][1] ? KEYS[key ?? 'C'][1] * 9 + 5 : 0);
 
 // Zeilen aufteilen und Notenpositionen festlegen
 export function layoutScore(song) {
   const measures = accidentalsShown(parseMelody(song.melody), song.key);
+  const lyrics = song.lyrics ? parseLyrics(song.lyrics) : null;
+  if (lyrics) for (const n of measures.flat()) if (n.index !== undefined) n.lyric = lyrics[n.index] ?? '';
   const natural = measures.map((m) => SCORE.measurePad + m.reduce((s, n) => s + widthOf(n), 0) + 3);
   const ks = keySigWidth(song.key);
   const lines = [];
@@ -134,6 +153,8 @@ export function layoutScore(song) {
     width,
     time: song.time,
     key: song.key ?? 'C',
+    lyrics: !!lyrics,
+    height: lyrics ? GEOMETRY.height + 10 : GEOMETRY.height, // Platz für den Text unter dem System
     keySigWidth: ks,
     lines: lines.map((line, li) => {
       const start = SCORE.clefArea + ks + (li === 0 ? SCORE.timeSigWidth : 0);
@@ -152,7 +173,7 @@ export function layoutScore(song) {
             continue;
           }
           const step = staffStep('treble', n.note);
-          const x = nx + ((n.showAcc ? ACC_WIDTH : 0) + advance(n) / 2 - 2) * scale;
+          const x = nx + ((n.showAcc ? ACC_WIDTH : 0) + (widthOf(n) - (n.showAcc ? ACC_WIDTH : 0)) / 2 - 2) * scale;
           notes.push({ ...n, measure: mi, step, x: +x.toFixed(2), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
           nx += widthOf(n) * scale;
         }
@@ -274,7 +295,7 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
     })
     .join('');
   return (
-    `<svg class="staff seq score" viewBox="0 0 ${layout.width} ${g.height}" style="--seq-ratio: ${layout.width / g.height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}">` +
+    `<svg class="staff seq score" viewBox="0 0 ${layout.width} ${layout.height}" style="--seq-ratio: ${layout.width / layout.height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}">` +
     cursor +
     `<g class="staff-lines" stroke="currentColor" stroke-width="${g.lineWidth}">${staffLines}</g>` +
     `<g class="clef" data-clef="treble" transform="translate(${g.clefX} ${stepY(2)}) scale(${SPACE})" fill="currentColor">${CLEF_SHAPES.treble}</g>` +
@@ -285,6 +306,16 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
     tieArcs(line.notes) +
     line.rests.map((r) => `<g class="rest" data-value="${r.value}${r.dotted ? '.' : ''}" transform="translate(${r.x} 0)" fill="currentColor">${restShape(r)}</g>`).join('') +
     notes +
+    (layout.lyrics
+      ? `<g class="lyrics" font-size="${LYRIC_SIZE}" text-anchor="middle" fill="currentColor">` +
+        line.notes
+          .filter((n) => n.lyric)
+          .map((n) => `<text class="lyric" data-index="${n.index}" x="${n.x}" y="${layout.height - 4}">${escapeXml(n.lyric)}</text>`)
+          .join('') +
+        '</g>'
+      : '') +
     `</svg>`
   );
 }
+
+const escapeXml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

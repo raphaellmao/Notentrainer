@@ -19,7 +19,15 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
   mit „Anhören“. Liederbuch in `js/songs.js` – nur gemeinfreie Melodien, Notensatz in `js/score.js`.
 - **Im Takt spielen (Lieder):** Metronom zählt einen Takt ein, dann läuft das Lied im gewählten Tempo (langsam/mittel/normal).
   Jede Note wird nach Taste und Zeitpunkt bewertet (im Takt / zu früh / zu spät / verpasst), mit Mikrofon zählt der
-  Zeitpunkt des Anschlags (`js/rhythm.js`).
+  Zeitpunkt des Anschlags (`js/rhythm.js`). Das Metronom klickt mit kurzem Rauschen statt mit einem Ton, damit es
+  beim Spielen mit Mikrofon keine Klaviertöne überdeckt.
+- **Takt-Abgleich:** Handy, Bluetooth-Kopfhörer und Mikrofon verzögern etwas. Unter „Takt-Abgleich“ (Liederliste bzw.
+  Auswertung) tippt man 12-mal mit dem Klick – oder spielt mit Mikrofon am Klavier –, die App speichert die typische
+  Abweichung getrennt für Tippen und Mikrofon und zieht sie bei der Wertung ab. Liegt nach einer Runde fast alles
+  gleich weit daneben, schlägt die Auswertung den Abgleich vor.
+- **Liedtext:** Die Lieder im Liederbuch haben ihren Text unter den Noten (`lyrics` in `js/songs.js`, eine Silbe je
+  angeschlagener Note, Schreibweise wie ABC: „Al-le mei-ne“, „_“ = Silbe wird weitergesungen). Beim ABC-Import wird die
+  erste Strophe aus den „w:“-Zeilen übernommen, wenn die Silben genau auf die Noten aufgehen.
 - **Einmessen:** Im Mikrofon-Modus misst „Einmessen“ die Stimmung des eigenen Klaviers (`js/tuning.js`) und rechnet sie
   bei der Erkennung heraus – auch bei einem stark verstimmten Klavier.
 - **Vorzeichen:** Stufe „Vorzeichen“ mit Kreuz und b (deutsche Namen: Cis … Ais, Des Es Ges As B); Fis und Ges sind dieselbe
