@@ -239,7 +239,7 @@ export class NoteListener {
     if (midi !== null && midi === this.run.midi) {
       this.run.count++;
       if (frame?.freq) this.run.freqs.push(frame.freq);
-    } else this.run = { midi, count: midi === null ? 0 : 1, ref: prevSpec, freqs: frame?.freq && midi !== null ? [frame.freq] : [] };
+    } else this.run = { midi, count: midi === null ? 0 : 1, ref: prevSpec, freqs: frame?.freq && midi !== null ? [frame.freq] : [], t };
 
     if (this.open && t - this.onsetAt > this.windowMs) this.open = false;
     if (this.open) {
@@ -254,13 +254,13 @@ export class NoteListener {
       if (this.count >= this.stableFrames) {
         if (this.pianoOnly && this.onsetRise !== null && this.onsetRise > this.maxRiseMs) return this.reject(midi); // weicher Einsatz
         if (this.pianoOnly && wobble(this.candFreqs) > this.maxWobbleCents) return this.reject(midi); // Tonhöhe schwankt
-        return this.emit(midi, this.onsetRef);
+        return this.emit(midi, this.onsetRef, this.onsetAt);
       }
       return null;
     }
     if (loudEnough && this.run.count >= this.changeFrames && this.run.midi !== this.sounding) {
       if (this.pianoOnly && wobble(this.run.freqs) > this.maxWobbleCents) return null;
-      return this.emit(this.run.midi, this.run.ref);
+      return this.emit(this.run.midi, this.run.ref, this.run.t);
     }
     return null;
   }
@@ -273,7 +273,9 @@ export class NoteListener {
     return null;
   }
 
-  emit(midi, ref) {
+  // at: Zeitpunkt des Anschlags (für die Rhythmus-Bewertung) – nicht der spätere Moment der Erkennung
+  emit(midi, ref, at = null) {
+    this.eventAt = at;
     this.open = false;
     if (!hasNewEnergy(midi, this.lastSpec, ref, this.sampleRate, this.refA)) return null; // Mischklang: lieber nichts
     this.sounding = midi;

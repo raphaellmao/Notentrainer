@@ -5,6 +5,7 @@ import { Microphone } from './mic.js';
 import { SONGS } from './songs.js';
 import { layoutScore, renderScoreLine, parseMelody, songNotes } from './score.js';
 import { importAbc } from './abc.js';
+import { schedule, judge, missedAfter, summarizeRhythm, TIMING_TEXT } from './rhythm.js';
 import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
 import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
@@ -80,6 +81,9 @@ const ui = {
   overviewBack: $('#overview-back'),
   toast: $('#toast'),
   micBtn: $('#mic-btn'),
+  sumRhythm: $('#sum-rhythm'),
+  rhythmBtn: $('#rhythm-btn'),
+  rhythmTempo: $('#rhythm-tempo'),
   songbar: $('#songbar'),
   songTitle: $('#song-title'),
   songLine: $('#song-line'),
@@ -101,7 +105,7 @@ let toastTimer = 0;
 let viewBeforeOverview = 'play';
 
 function loadSettings() {
-  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null };
+  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null, rhythmTempo: 0.8 };
   try {
     const saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}');
     return {
@@ -111,6 +115,7 @@ function loadSettings() {
       // gemessene Stimmung des Klaviers; nur plausible Werte (etwa ±1 Halbton um 440 Hz)
       refA: Number.isFinite(saved.refA) && saved.refA > 410 && saved.refA < 470 ? saved.refA : fallback.refA,
       song: allSongs().some((x) => x.id === saved.song) ? saved.song : fallback.song,
+      rhythmTempo: [0.6, 0.8, 1].includes(saved.rhythmTempo) ? saved.rhythmTempo : fallback.rhythmTempo,
     };
   } catch {
     return fallback;
@@ -152,6 +157,7 @@ const noteList = (items) =>
   items.map((it) => (settings.mode === 'mixed' ? `${helmholtzName(it.note)} (${it.clef === 'treble' ? 'Violin' : 'Bass'})` : helmholtzName(it.note))).join(', ');
 
 function showOverview() {
+  stopRhythm();
   if (!OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = document.body.dataset.view;
   ui.overviewList.innerHTML = ['treble', 'bass']
     .map((clef) => {
@@ -254,6 +260,7 @@ function closeOverview() {
 }
 
 function startRound() {
+  stopRhythm();
   clearTimeout(timer);
   trainer.configure(settings.mode, settings.level);
   ui.songbar.hidden = settings.level !== 'lieder';
@@ -275,6 +282,7 @@ let currentSong = null;
 let playbackUntil = 0; // während „Anhören“ zählt das Mikrofon nicht
 
 function showSongs() {
+  stopRhythm();
   clearTimeout(timer);
   const card = (song) => {
     const notes = songNotes(song);
@@ -330,6 +338,128 @@ function runImport(text) {
   out.innerHTML = parts.join('');
   showSongs();
   $('#import-panel').open = true;
+}
+
+// --- Im Takt spielen (Stufe 4): Metronom, Einzählen, Bewertung der Zeitpunkte ---
+
+let rhythm = null; // läuft gerade: { sched, startPerf, results, raf, timers }
+let lastRhythm = null; // Ergebnis für die Auswertung
+
+async function startRhythm() {
+  if (!currentSong) return;
+  stopRhythm();
+  clearTimeout(timer);
+  piano.unlock();
+  if (piano.ctx && piano.ctx.state !== 'running') await piano.ctx.resume().catch(() => {});
+  const sched = schedule(currentSong, settings.rhythmTempo);
+  // Lied von vorn
+  startSong(currentSong);
+  locked = false;
+  const countInMs = sched.perBar * sched.beatMs;
+  const leadMs = 250;
+  const perfNow = performance.now();
+  const latency = piano.latencyMs;
+  const startPerf = perfNow + leadMs + countInMs + latency;
+  rhythm = { sched, startPerf, results: [], raf: 0, timers: [] };
+  document.body.dataset.rhythm = 'on';
+  document.body.dataset.rhythmStart = String(startPerf); // auch für Tests auslesbar
+  ui.rhythmBtn.innerHTML = '■ Stopp';
+
+  // Metronom: ein Takt Einzählen, dann durch das ganze Lied (betont auf der Eins)
+  if (piano.ctx && piano.ctx.state === 'running') {
+    rhythm.bus = piano.ctx.createGain();
+    rhythm.bus.connect(piano.out);
+    const audioStart = piano.ctx.currentTime + (leadMs + countInMs) / 1000;
+    for (let k = 0; k < sched.perBar; k++) piano.click(audioStart - ((sched.perBar - k) * sched.beatMs) / 1000, k === 0, rhythm.bus);
+    for (let b = 0; b * sched.beatMs < sched.totalMs - 1; b++) piano.click(audioStart + (b * sched.beatMs) / 1000, b % sched.perBar === 0, rhythm.bus);
+  } else showToast('Ohne Ton – zähle selbst mit');
+
+  // Einzählen anzeigen
+  ui.feedback.className = 'feedback';
+  for (let k = 0; k < sched.perBar; k++) {
+    rhythm.timers.push(
+      setTimeout(() => {
+        ui.feedback.innerHTML = `<span class="count-in">${k + 1}</span>`;
+      }, leadMs + latency + k * sched.beatMs),
+    );
+  }
+  rhythm.timers.push(setTimeout(() => (ui.feedback.innerHTML = '<span class="count-in go">Los!</span>'), startPerf - perfNow - 40));
+
+  const tick = () => {
+    if (!rhythm) return;
+    rhythm.raf = requestAnimationFrame(tick);
+    const now = performance.now() - rhythm.startPerf;
+    const note = rhythm.sched.notes[trainer.position];
+    if (note && now > missedAfter(note, rhythm.sched.quarterMs)) {
+      // verpasst: Lied läuft weiter wie echte Musik
+      rhythm.results.push({ timing: 'missed', delta: null, correct: false });
+      seqStates[trainer.position] = 'wrong';
+      const res = trainer.skip();
+      ui.feedback.className = 'feedback wrong';
+      ui.feedback.innerHTML = `<span class="verdict">verpasst</span><span class="name">${germanName(res.item.note)}</span><span class="octave">${helmholtzName(res.item.note)}</span>`;
+      advanceRhythm(res.done);
+    }
+  };
+  rhythm.raf = requestAnimationFrame(tick);
+}
+
+function advanceRhythm(done) {
+  const { answered, total } = trainer.progress;
+  ui.progress.style.width = `${(answered / total) * 100}%`;
+  if (done || !trainer.advance()) {
+    drawSequence(trainer.sequence.length - 1);
+    finishRhythm();
+    return;
+  }
+  ui.count.textContent = String(answered + 1);
+  drawSequence(trainer.position);
+}
+
+function answerInRhythm(tapped, at) {
+  const note = rhythm.sched.notes[trainer.position];
+  if (!note) return;
+  const delta = at - rhythm.startPerf - note.at;
+  if (delta < -rhythm.sched.beatMs * 1.5) return; // noch beim Einzählen: ignorieren
+  if (settings.sound && !mic.active) piano.play(frequency(tapped));
+  const timing = judge(delta, rhythm.sched.quarterMs);
+  const result = trainer.answer(tapped, 1000);
+  rhythm.results.push({ timing, delta, correct: result.correct });
+  seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
+  marks = { [tapped]: result.correct ? 'right' : 'wrong' };
+  if (!result.correct) marks[keyOf(result.item.note)] = 'right';
+  drawKeyboard();
+  const keysShown = marks;
+  setTimeout(() => {
+    if (marks === keysShown) {
+      marks = {};
+      drawKeyboard();
+    }
+  }, 250);
+  ui.feedback.className = `feedback ${result.correct ? 'right' : 'wrong'} timing-${timing}`;
+  ui.feedback.innerHTML =
+    `<span class="verdict">${result.correct ? 'Richtig' : 'Falsch'}</span>` +
+    `<span class="name">${germanName(result.item.note)}</span>` +
+    `<span class="timing">${TIMING_TEXT[timing]}</span>`;
+  advanceRhythm(result.done);
+}
+
+function finishRhythm() {
+  if (!rhythm) return;
+  lastRhythm = summarizeRhythm(rhythm.results);
+  stopRhythm();
+  locked = true;
+  timer = setTimeout(showSummary, 900);
+}
+
+function stopRhythm() {
+  if (!rhythm) return;
+  cancelAnimationFrame(rhythm.raf);
+  rhythm.timers.forEach(clearTimeout);
+  rhythm.bus?.disconnect(); // vorausgeplante Metronom-Klicks verstummen
+  rhythm = null;
+  delete document.body.dataset.rhythm;
+  delete document.body.dataset.rhythmStart;
+  ui.rhythmBtn.innerHTML = '♩ Im Takt<span class="long"> spielen</span>';
 }
 
 // Melodie vorspielen (Tempo aus dem Lied, Viertel = 60/Tempo Sekunden)
@@ -446,9 +576,9 @@ function showFeedback(result, tapped) {
 // --- Mikrofon: am echten Klavier antworten ---
 
 const mic = new Microphone({
-  onNote: (midi) => {
+  onNote: (midi, at) => {
     if (locked || !trainer.current || document.body.dataset.view !== 'play' || performance.now() < playbackUntil) return;
-    answer(noteFromMidi(midi));
+    answer(noteFromMidi(midi), at);
   },
   // Pegel + live gehörte Note anzeigen; nach 8 s Stille einen Hinweis geben
   onLevel: (level, heardMidi) => {
@@ -581,7 +711,8 @@ function syncMic() {
   if (!locked && document.body.dataset.view === 'play') showFeedback(null);
 }
 
-function answer(tapped) {
+function answer(tapped, at = performance.now()) {
+  if (rhythm) return answerInRhythm(tapped, at);
   locked = true;
   // im Mikrofon-Modus kein eigener Ton – sonst hört sich die App selbst
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
@@ -607,9 +738,18 @@ function answer(tapped) {
 
 function showSummary() {
   const s = trainer.summary();
+  const rhythmRun = lastRhythm; // bei „Im Takt“ gibt das Tempo die Zeit vor – Antwortzeit ohne Aussage
+  ui.sumRhythm.hidden = !lastRhythm;
+  if (lastRhythm) {
+    const r = lastRhythm;
+    ui.sumRhythm.textContent =
+      `Im Takt: ${r.ok} von ${r.total} · ${r.early} zu früh · ${r.late} zu spät · ${r.missed} verpasst` +
+      (r.total - r.missed ? ` · Abweichung im Schnitt ${r.avgAbsMs} ms` : '');
+    lastRhythm = null;
+  }
   ui.sumScore.textContent = `${s.correct}/${s.total}`;
   ui.sumRate.textContent = `richtig (${Math.round(s.rate * 100)} %)`;
-  ui.sumTime.textContent = `${seconds(s.avgMs)} s`;
+  ui.sumTime.textContent = rhythmRun ? '–' : `${seconds(s.avgMs)} s`;
   ui.sumUnlocked.hidden = s.unlocked.length === 0;
   ui.sumUnlocked.textContent = `Neu freigeschaltet: ${noteList(s.unlocked)}`;
   ui.sumWrong.innerHTML = s.wrong
@@ -630,7 +770,8 @@ ui.keyboard.addEventListener('pointerdown', (event) => {
   if (!event.isPrimary || event.button > 0) return;
   event.preventDefault();
   if (locked || !layout || !trainer.current) return;
-  answer(keyAtClientPoint(layout, ui.keyboard.getBoundingClientRect(), event.clientX, event.clientY));
+  // Zeitpunkt des Antippens (für „Im Takt“) – timeStamp ist auf derselben Uhr wie performance.now()
+  answer(keyAtClientPoint(layout, ui.keyboard.getBoundingClientRect(), event.clientX, event.clientY), event.timeStamp || performance.now());
 });
 ui.keyboard.addEventListener('contextmenu', (event) => event.preventDefault());
 
@@ -691,6 +832,18 @@ $('#import-result').addEventListener('click', (event) => {
   startRound();
 });
 $('#song-listen').addEventListener('click', playSong);
+ui.rhythmBtn.addEventListener('click', () => {
+  if (rhythm) {
+    stopRhythm();
+    startSong(currentSong);
+  } else startRhythm();
+});
+ui.rhythmTempo.value = String(settings.rhythmTempo);
+ui.rhythmTempo.addEventListener('change', () => {
+  settings.rhythmTempo = Number(ui.rhythmTempo.value);
+  saveSettings();
+  if (rhythm) startRhythm();
+});
 ui.otherSong.addEventListener('click', showSongs);
 
 ui.sound.addEventListener('click', () => {

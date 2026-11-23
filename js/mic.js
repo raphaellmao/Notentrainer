@@ -64,7 +64,8 @@ export class Microphone {
     this.onLevel?.(rms, heard);
     const note = this.listener.feed(rms, midi, now, hf, frame);
     this.onFrame?.(frame, note);
-    if (note !== null && !this.calibrating) this.onNote(note);
+    // Anschlag liegt im Messfenster etwas vor dessen Ende (≈ halber Takt der Auswertung)
+    if (note !== null && !this.calibrating) this.onNote(note, (this.listener.eventAt ?? now) - EVERY_MS / 2);
   };
 
   // Nach dem Zurückkehren aus dem Hintergrund weiterlauschen

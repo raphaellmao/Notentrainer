@@ -6,7 +6,7 @@
 // VERSION trotzdem bei jeder Veröffentlichung erhöhen: Dann installiert sich ein
 // neuer Service Worker, lädt alle Dateien frisch vor und löscht die alten Caches.
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const CACHE = `notentrainer-${VERSION}`;
 const FILES = [
   './',
@@ -25,6 +25,7 @@ const FILES = [
   './js/songs.js',
   './js/abc.js',
   './js/backup.js',
+  './js/rhythm.js',
   './js/staff.js',
   './js/trainer.js',
   './notentabelle.html',

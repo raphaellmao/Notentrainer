@@ -269,6 +269,13 @@ export class Trainer {
     return this.current;
   }
 
+  // Im Takt: Note verpasst – zählt in der Runde als falsch, aber nicht in der Statistik der Note
+  skip() {
+    const item = this.current;
+    this.answers.push({ item, tapped: null, correct: false, ms: 0, missed: true, unlocked: [] });
+    return { correct: false, item, unlocked: [], done: this.answers.length >= this.roundLength };
+  }
+
   // tapped: Note der angetippten Taste (schwarze Tasten zählen immer als falsch)
   answer(tapped, ms) {
     const item = this.current;

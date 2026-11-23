@@ -17,6 +17,9 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
 
 - **Stufe 4 (Lieder):** ganze Lieder mit Rhythmus (Ganze, Halbe, Viertel, Achtel, Punktierungen), Zeile für Zeile spielen,
   mit „Anhören“. Liederbuch in `js/songs.js` – nur gemeinfreie Melodien, Notensatz in `js/score.js`.
+- **Im Takt spielen (Lieder):** Metronom zählt einen Takt ein, dann läuft das Lied im gewählten Tempo (langsam/mittel/normal).
+  Jede Note wird nach Taste und Zeitpunkt bewertet (im Takt / zu früh / zu spät / verpasst), mit Mikrofon zählt der
+  Zeitpunkt des Anschlags (`js/rhythm.js`).
 - **Einmessen:** Im Mikrofon-Modus misst „Einmessen“ die Stimmung des eigenen Klaviers (`js/tuning.js`) und rechnet sie
   bei der Erkennung heraus – auch bei einem stark verstimmten Klavier.
 - **Vorzeichen:** Stufe „Vorzeichen“ mit Kreuz und b (deutsche Namen: Cis … Ais, Des Es Ges As B); Fis und Ges sind dieselbe

@@ -60,10 +60,20 @@
   <main>
     <section class="stage" aria-label="Übung">
       <div class="songbar" id="songbar" hidden>
-        <button type="button" class="link-btn" id="song-list-btn">‹ Lieder</button>
-        <b id="song-title"></b>
-        <span class="song-line" id="song-line"></span>
-        <button type="button" class="link-btn" id="song-listen">▶ Anhören</button>
+        <div class="songbar-top">
+          <button type="button" class="link-btn" id="song-list-btn">‹ Lieder</button>
+          <b id="song-title"></b>
+          <span class="song-line" id="song-line"></span>
+        </div>
+        <div class="songbar-actions">
+          <button type="button" class="link-btn" id="song-listen">▶ Anhören</button>
+          <button type="button" class="rhythm-btn" id="rhythm-btn">♩ Im Takt<span class="long"> spielen</span></button>
+          <select id="rhythm-tempo" aria-label="Tempo">
+            <option value="0.6">langsam</option>
+            <option value="0.8">mittel</option>
+            <option value="1">normal</option>
+          </select>
+        </div>
       </div>
       <div class="paper" id="staff"></div>
       <p class="feedback" id="feedback" aria-live="polite"></p>
@@ -79,6 +89,7 @@
       <div class="wrong-list" id="sum-wrong"></div>
       <p class="all-right" id="sum-all-right" hidden>Alles richtig – stark!</p>
       <p class="unlocked" id="sum-unlocked" hidden></p>
+      <p class="rhythm-sum" id="sum-rhythm" hidden></p>
       <button type="button" class="primary" id="again">Nochmal</button>
       <button type="button" class="secondary" id="other-song" hidden>Anderes Lied</button>
     </section>

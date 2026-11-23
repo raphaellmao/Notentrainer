@@ -545,3 +545,62 @@ body[data-view="songs"] .keys { display: none; }
 .backup h3 { margin: 0 0 4px; }
 .backup .note-small { margin: 0 0 10px; max-width: none; }
 .backup-ok { color: var(--right); font-weight: 600; }
+
+/* --- Im Takt spielen --- */
+.songbar { flex-direction: column; align-items: stretch; gap: 4px; }
+.songbar-top, .songbar-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.songbar-top b { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.songbar-actions { justify-content: flex-start; flex-wrap: wrap; }
+.rhythm-btn { border: 0; border-radius: 10px; padding: 6px 12px; background: var(--accent); color: var(--accent-text); font-size: 15px; font-weight: 700; }
+body[data-rhythm="on"] .rhythm-btn { background: var(--wrong); color: #fff; }
+#rhythm-tempo { border: 0; border-radius: 10px; padding: 6px 8px; background: var(--seg); color: var(--text); font: inherit; font-size: 14px; }
+body[data-rhythm="on"] #song-listen { visibility: hidden; }
+.count-in { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.count-in.go { color: var(--right); }
+.feedback .timing { font-size: 16px; font-weight: 700; }
+.feedback.timing-ok .timing { color: var(--right); }
+.feedback.timing-early .timing, .feedback.timing-late .timing { color: var(--amber); }
+.rhythm-sum { margin: 16px auto 0; max-width: 44ch; font-size: 16px; font-weight: 600; }
+@media (orientation: landscape) and (max-height: 540px) {
+  .songbar-top { flex-direction: column; gap: 2px; text-align: center; }
+  .songbar-top b { white-space: normal; font-size: 14px; }
+  .songbar-actions { flex-direction: column; gap: 4px; }
+  .rhythm-btn { font-size: 13px; padding: 4px 8px; }
+}
+
+/* Querformat: Liedleiste in der Seitenspalte kompakt halten (Noten bekommen die volle Höhe) */
+@media (orientation: landscape) and (max-height: 540px) {
+  .songbar { gap: 2px; }
+  .songbar-top { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 0 8px; }
+  .songbar-top b { order: -1; flex-basis: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 1.3; }
+  .songbar-top .song-line { display: none; }
+  .songbar-top .link-btn, .songbar-actions .link-btn { padding: 0 2px; font-size: 13px; }
+  .songbar-actions { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 4px 6px; }
+  .rhythm-btn .long { display: none; }
+  .rhythm-btn { padding: 4px 8px; font-size: 13px; }
+  #rhythm-tempo { padding: 4px 6px; font-size: 13px; }
+  .feedback { min-height: 0; }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .songbar { display: grid; grid-template-columns: auto auto; grid-template-areas: "title title" "list listen" "rhythm tempo"; justify-content: center; align-items: center; gap: 3px 6px; }
+  .songbar[hidden] { display: none; }
+  .songbar-top, .songbar-actions { display: contents; }
+  #song-title { grid-area: title; text-align: center; }
+  #song-list-btn { grid-area: list; }
+  #song-listen { grid-area: listen; }
+  #rhythm-btn { grid-area: rhythm; }
+  #rhythm-tempo { grid-area: tempo; }
+}
+/* schmale Handys (Hochformat): Knopfreihe der Liedleiste in einer Zeile */
+@media (max-width: 400px) {
+  .rhythm-btn .long { display: none; }
+  .songbar-actions { flex-wrap: nowrap; gap: 8px; }
+  .songbar-actions .link-btn { font-size: 14px; padding: 2px 0; }
+  .rhythm-btn { padding: 5px 10px; font-size: 14px; }
+  #rhythm-tempo { font-size: 13px; }
+  body:has(#songbar:not([hidden])) .feedback { height: 52px; }
+}
+/* kleine Handys im Hochformat: bei Liedern etwas Höhe von der Klaviatur an die Noten abgeben */
+@media (orientation: portrait) and (max-height: 700px) {
+  body:has(#songbar:not([hidden])) .keys { height: clamp(150px, 31dvh, 290px); }
+}

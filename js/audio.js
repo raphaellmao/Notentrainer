@@ -104,6 +104,28 @@ export class Piano {
   }
 
   // Ein Anschlag: Grundton + Obertöne, die unterschiedlich schnell verklingen
+  // Metronom-Klick zur Zeit at (AudioContext-Zeit in Sekunden); betont auf der Eins
+  // bus: eigener Lautstärkeregler, damit sich vorausgeplante Klicks beim Stoppen abschalten lassen
+  click(at, accent = false, bus = this.out) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = accent ? 2000 : 1400;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(accent ? 0.35 : 0.2, at + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+    osc.connect(gain).connect(bus);
+    osc.start(at);
+    osc.stop(at + 0.06);
+  }
+
+  // Verzögerung bis zum Lautsprecher (ms) – damit Klick und erwarteter Zeitpunkt zusammenpassen
+  get latencyMs() {
+    return ((this.ctx?.outputLatency || this.ctx?.baseLatency || 0) * 1000);
+  }
+
   // delay: Sekunden ab jetzt (zum Vorspielen ganzer Melodien)
   voice(freq, delay = 0) {
     const ctx = this.ctx;
