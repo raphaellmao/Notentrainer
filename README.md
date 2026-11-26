@@ -25,6 +25,14 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
   Auswertung) tippt man 12-mal mit dem Klick – oder spielt mit Mikrofon am Klavier –, die App speichert die typische
   Abweichung getrennt für Tippen und Mikrofon und zieht sie bei der Wertung ab. Liegt nach einer Runde fast alles
   gleich weit daneben, schlägt die Auswertung den Abgleich vor.
+- **Beide Hände:** Lieder können eine Begleitung für die linke Hand haben (`left` in `js/songs.js`, eigene einfache
+  Bearbeitung; bisher Entchen, Hänschen klein, Bruder Jakob). Sie stehen dann im Klaviersystem (Violin- und Bassschlüssel
+  mit Klammer, gleichzeitige Noten genau übereinander) und die Klaviatur reicht über beide Hände. In der Liedleiste
+  wählt man „2 Hände“, „rechts“ oder „links“; die nicht gespielte Hand bleibt blass sichtbar. Zusammenklänge brauchen
+  alle Tasten (Reihenfolge egal, mehrere Finger gleichzeitig gehen). Mit Mikrofon zählt bei Zusammenklängen schon ein
+  erkannter Ton (auch in anderer Oktave – Zusammenklänge täuschen die Oktave). Passt das Gehörte zu keiner Note des
+  Klangs, wertet die App es nicht als Fehler; dann die oberste Note einzeln nachspielen. In der Simulation wurden z. B.
+  c + c¹, f + a¹ und g + d¹ erkannt, e + g¹ nicht. Zum Üben am Klavier die Hände am besten erst einzeln.
 - **Liedtext:** Die Lieder im Liederbuch haben ihren Text unter den Noten (`lyrics` in `js/songs.js`, eine Silbe je
   angeschlagener Note, Schreibweise wie ABC: „Al-le mei-ne“, „_“ = Silbe wird weitergesungen). Beim ABC-Import wird die
   erste Strophe aus den „w:“-Zeilen übernommen, wenn die Silben genau auf die Noten aufgehen.

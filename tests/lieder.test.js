@@ -62,7 +62,10 @@ test('Liederbuch: bekannte Melodieanfänge stimmen', () => {
   assert.equal(start('jinglebells', 7), 'E4 E4 E4 E4 E4 E4 E4');
 });
 
-for (const song of SONGS) {
+// Melodie allein (Lieder mit linker Hand stehen sonst im Klaviersystem – eigene Tests in haende.test.js)
+const melodyOnly = (song) => ({ ...song, left: undefined });
+
+for (const song of SONGS.map(melodyOnly)) {
   test(`Notensatz „${song.title}“: Position, Hilfslinien, Hälse, Punkte, Köpfe, Taktstriche`, () => {
     const layout = layoutScore(song);
     const measures = parseMelody(song.melody);
@@ -187,7 +190,7 @@ test('Vorzeichen-Regeln: Tonart gilt, Zeichen gilt bis zum Taktstrich, Abweichun
 });
 
 test('Bruder Jakob in F-Dur: ein b am Zeilenanfang, die B-Noten ohne eigenes Zeichen', () => {
-  const song = SONGS.find((s) => s.id === 'jakob');
+  const song = melodyOnly(SONGS.find((s) => s.id === 'jakob'));
   const layout = layoutScore(song);
   const all = layout.lines.map((_, i) => renderScoreLine(layout, i)).join('');
   assert.equal([...all.matchAll(/class="accidental key" data-acc="b"/g)].length, layout.lines.length, 'ein b je Zeile');
@@ -240,7 +243,7 @@ test('Liedtext: im Liederbuch genau eine Silbe je angeschlagener Note', () => {
 });
 
 test('Liedtext: steht unter der richtigen Note, mittig, und das Bild wird höher', () => {
-  const song = SONGS.find((s) => s.id === 'entchen');
+  const song = melodyOnly(SONGS.find((s) => s.id === 'entchen'));
   const layout = layoutScore(song);
   assert.equal(layout.lyrics, true);
   assert.ok(layout.height > layoutScore({ ...song, lyrics: undefined }).height);

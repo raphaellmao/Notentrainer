@@ -526,6 +526,16 @@ body[data-view="songs"] .keys { display: none; }
   .level-select select { min-height: 38px; font-size: 14px; }
   .progress-row { margin-top: -2px; }
 }
+/* Querformat bei Liedern: unter der Liedleiste ist wenig Platz – Rückmeldung in einer Zeile, kleiner */
+@media (orientation: landscape) and (max-height: 540px) {
+  body:has(#songbar:not([hidden])) .feedback { flex-direction: row; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 2px 6px; }
+  body:has(#songbar:not([hidden])) .feedback .verdict { padding: 2px 8px; font-size: 13px; }
+  body:has(#songbar:not([hidden])) .feedback .name { font-size: 22px; }
+  body:has(#songbar:not([hidden])) .feedback .octave { font-size: 15px; }
+  body:has(#songbar:not([hidden])) .feedback .played,
+  body:has(#songbar:not([hidden])) .feedback .timing { flex-basis: 100%; text-align: center; font-size: 12px; }
+  body:has(#songbar:not([hidden])) .feedback .hint { font-size: 13px; }
+}
 
 /* --- Lieder importieren --- */
 .song-row { display: flex; gap: 6px; align-items: stretch; }
@@ -558,7 +568,9 @@ body[data-view="songs"] .keys { display: none; }
 .songbar-actions { justify-content: flex-start; flex-wrap: wrap; }
 .rhythm-btn { border: 0; border-radius: 10px; padding: 6px 12px; background: var(--accent); color: var(--accent-text); font-size: 15px; font-weight: 700; }
 body[data-rhythm="on"] .rhythm-btn { background: var(--wrong); color: #fff; }
-#rhythm-tempo { border: 0; border-radius: 10px; padding: 6px 8px; background: var(--seg); color: var(--text); font: inherit; font-size: 14px; }
+#rhythm-tempo, #hands { border: 0; border-radius: 10px; padding: 6px 8px; background: var(--seg); color: var(--text); font: inherit; font-size: 14px; }
+#hands { flex: 0 0 auto; }
+#hands[hidden] { display: none; }
 body[data-rhythm="on"] #song-listen { visibility: hidden; }
 .count-in { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .count-in.go { color: var(--right); }
@@ -581,6 +593,14 @@ body[data-rhythm="on"] #song-listen { visibility: hidden; }
 @keyframes sync-beat { from { transform: scale(1.03); } to { transform: scale(1); } }
 
 /* --- Liedtext unter den Noten --- */
+/* --- Beide Hände --- */
+.score .note.passive { opacity: 0.38; }
+.song-card .song-hands { color: var(--accent); font-weight: 600; }
+.feedback.partial .played { color: var(--muted); }
+/* Klaviersystem ist höher als ein System: im Hochformat etwas Höhe von der Klaviatur (weniger, breitere Tasten) */
+@media (orientation: portrait) {
+  body:has(#staff svg.grand) .keys { height: clamp(140px, 25dvh, 300px); }
+}
 .score .lyric { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 @media (orientation: landscape) and (max-height: 540px) {
   .songbar-top { flex-direction: column; gap: 2px; text-align: center; }
@@ -599,18 +619,20 @@ body[data-rhythm="on"] #song-listen { visibility: hidden; }
   .songbar-actions { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 4px 6px; }
   .rhythm-btn .long { display: none; }
   .rhythm-btn { padding: 4px 8px; font-size: 13px; }
-  #rhythm-tempo { padding: 4px 6px; font-size: 13px; }
+  #rhythm-tempo, #hands { padding: 2px 4px; font-size: 13px; line-height: 1.2; }
+  .rhythm-btn { white-space: nowrap; }
   .feedback { min-height: 0; }
 }
 @media (orientation: landscape) and (max-height: 540px) {
-  .songbar { display: grid; grid-template-columns: auto auto; grid-template-areas: "title title" "list listen" "rhythm tempo"; justify-content: center; align-items: center; gap: 3px 6px; }
+  .songbar { display: grid; grid-template-columns: auto auto; grid-template-areas: "list title" "listen hands" "rhythm tempo"; justify-content: center; align-items: center; gap: 3px 6px; }
   .songbar[hidden] { display: none; }
   .songbar-top, .songbar-actions { display: contents; }
-  #song-title { grid-area: title; text-align: center; }
+  #song-title { grid-area: title; text-align: left; max-width: 26ch; }
   #song-list-btn { grid-area: list; }
   #song-listen { grid-area: listen; }
   #rhythm-btn { grid-area: rhythm; }
   #rhythm-tempo { grid-area: tempo; }
+  #hands { grid-area: hands; justify-self: start; }
 }
 /* schmale Handys (Hochformat): Knopfreihe der Liedleiste in einer Zeile */
 @media (max-width: 400px) {
@@ -618,8 +640,11 @@ body[data-rhythm="on"] #song-listen { visibility: hidden; }
   .songbar-actions { flex-wrap: nowrap; gap: 8px; }
   .songbar-actions .link-btn { font-size: 14px; padding: 2px 0; }
   .rhythm-btn { padding: 5px 10px; font-size: 14px; }
-  #rhythm-tempo { font-size: 13px; }
-  body:has(#songbar:not([hidden])) .feedback { height: 52px; }
+  #rhythm-tempo, #hands { font-size: 13px; }
+  body:has(#songbar:not([hidden])) .feedback { height: 60px; }
+  body:has(#songbar:not([hidden])) .feedback .played { line-height: 1.15; }
+  .songbar-top:has(#hands:not([hidden])) .song-line { display: none; }
+  .songbar-top { gap: 8px; }
 }
 /* kleine Handys im Hochformat: bei Liedern etwas Höhe von der Klaviatur an die Noten abgeben */
 @media (orientation: portrait) and (max-height: 700px) {

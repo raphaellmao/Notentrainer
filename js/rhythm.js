@@ -1,7 +1,7 @@
 // Rhythmus: „Im Takt spielen“ – Zeitplan eines Lieds und Bewertung der Zeitpunkte.
 // Reine Rechnung ohne DOM. Alle Zeiten in Millisekunden ab dem ersten Schlag nach dem Einzählen.
 
-import { parseMelody } from './score.js';
+import { parseMelody, songEvents } from './score.js';
 
 // Schlag des Metronoms je Taktart: bei 6/8, 9/8, 12/8 die punktierte Viertel, sonst der Nenner
 export function metronomeBeat([top, bottom]) {
@@ -10,19 +10,20 @@ export function metronomeBeat([top, bottom]) {
   return { beatQuarters, perBar: compound ? top / 3 : top };
 }
 
-// Wann ist jede anzuschlagende Note fällig? factor: Tempo-Faktor (0,6 = langsamer)
-export function schedule(song, factor = 1) {
+// Wann ist jedes Ereignis (Note bzw. Zusammenklang beider Hände) fällig? factor: Tempo-Faktor
+// (0,6 = langsamer), hands: 'right' | 'left' | 'both' (nur bei Liedern mit linker Hand)
+export function schedule(song, factor = 1, hands = 'both') {
   const quarterMs = 60000 / (song.tempo * factor);
-  const notes = [];
-  let t = 0;
-  for (const n of parseMelody(song.melody).flat()) {
-    const ms = n.beats * quarterMs;
-    if (n.tiedFrom && notes.length) notes[notes.length - 1].durMs += ms; // Haltebogen verlängert
-    else if (!n.rest) notes.push({ index: n.index, note: n.note, at: t, durMs: ms });
-    t += ms;
-  }
+  const notes = songEvents(song, hands).map((e) => ({
+    index: e.index,
+    note: e.notes[0].note,
+    notes: e.notes.map((n) => n.note),
+    at: e.at * quarterMs,
+    durMs: e.beats * quarterMs, // inkl. Haltebogen
+  }));
+  const totalMs = parseMelody(song.melody).flat().reduce((s, n) => s + n.beats, 0) * quarterMs;
   const { beatQuarters, perBar } = metronomeBeat(song.time);
-  return { quarterMs, beatMs: beatQuarters * quarterMs, perBar, notes, totalMs: t };
+  return { quarterMs, beatMs: beatQuarters * quarterMs, perBar, notes, totalMs };
 }
 
 // Spielraum für „im Takt“: ein Fünftel einer Viertel, mindestens 90, höchstens 180 ms

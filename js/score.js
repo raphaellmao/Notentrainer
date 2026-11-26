@@ -6,7 +6,7 @@
 // Noten werden mit ihrer tatsächlichen Tonhöhe geschrieben ("Bb4q", "F#4h"); ob vor der Note ein
 // Zeichen steht, ergibt sich aus Tonart und Takt (siehe accidentalsShown).
 
-import { staffStep, ledgerSteps, parseNote } from './notes.js';
+import { CLEFS, staffStep, ledgerSteps, parseNote, midiNumber } from './notes.js';
 import { GEOMETRY, SPACE, stepY, WHOLE_NOTE } from './staff.js';
 import { CLEF_SHAPES, accidentalSvg } from './clefs.js';
 
@@ -129,32 +129,139 @@ export function parseLyrics(text = '') {
 }
 const keySigWidth = (key) => (KEYS[key ?? 'C'][1] ? KEYS[key ?? 'C'][1] * 9 + 5 : 0);
 
-// Zeilen aufteilen und Notenpositionen festlegen
-export function layoutScore(song) {
-  const measures = accidentalsShown(parseMelody(song.melody), song.key);
+// Beide Hände: Ein Lied kann neben der Melodie (rechte Hand, Violinschlüssel) eine Begleitung
+// für die linke Hand haben (song.left, Bassschlüssel, gleiche Takte). hands: 'right' | 'left' | 'both'.
+const VOICES = [
+  { clef: 'treble', hand: 'right', key: 'melody' },
+  { clef: 'bass', hand: 'left', key: 'left' },
+];
+const voicesOf = (song) => VOICES.filter((v) => song[v.key]);
+// ohne linke Hand gibt es nur die Melodie
+export const handsFor = (song, hands = 'both') => (song.left ? hands : 'right');
+const plays = (song, hands, voice) => {
+  const h = handsFor(song, hands);
+  return h === 'both' || h === voice.hand;
+};
+
+// Was ist nacheinander anzuschlagen? Gleichzeitige Noten beider Hände bilden ein Ereignis
+// (Zusammenklang). at/beats in Vierteln ab Liedbeginn; Noten im Ereignis von tief nach hoch.
+export function songEvents(song, hands = 'both') {
+  const byTime = new Map();
+  for (const v of voicesOf(song)) {
+    if (!plays(song, hands, v)) continue;
+    let t = 0;
+    let last = null;
+    for (const n of parseMelody(song[v.key]).flat()) {
+      if (n.tiedFrom && last) last.beats += n.beats; // Haltebogen verlängert den Ton
+      else if (!n.rest) {
+        last = { clef: v.clef, hand: v.hand, note: n.note, noteIndex: n.index, beats: n.beats };
+        const k = Math.round(t * 1000);
+        if (!byTime.has(k)) byTime.set(k, { at: t, notes: [] });
+        byTime.get(k).notes.push(last);
+      }
+      t += n.beats;
+    }
+  }
+  return [...byTime.values()]
+    .sort((a, b) => a.at - b.at)
+    .map((e, index) => ({
+      index,
+      at: e.at,
+      beats: Math.max(...e.notes.map((n) => n.beats)),
+      notes: e.notes.sort((a, b) => midiNumber(a.note) - midiNumber(b.note)),
+    }));
+}
+
+// Klaviatur für ein Lied: ohne linke Hand wie im Violinschlüssel (c¹–c³), sonst von C der tiefsten
+// Oktave bis knapp über den höchsten Ton (bis E bzw. H), mindestens zwei Oktaven
+export function songKeyboard(song) {
+  if (!song.left) return CLEFS.treble.keyboard;
+  const all = voicesOf(song).flatMap((v) => parseMelody(song[v.key]).flat().filter((n) => !n.rest).map((n) => n.note));
+  const midis = all.map(midiNumber);
+  const lowOct = Math.floor(Math.min(...midis) / 12) - 1;
+  const top = Math.max(...midis, (lowOct + 3) * 12); // mindestens bis c zwei Oktaven höher
+  const oct = Math.floor(top / 12) - 1;
+  const pc = top % 12;
+  const high = pc === 0 ? `C${oct}` : pc <= 4 ? `E${oct}` : `B${oct}`;
+  return [`C${lowOct}`, high];
+}
+
+// Abstand zwischen den Systemen des Klaviersystems (Verschiebung des Bass-Systems)
+const GRAND = { brace: 7, gap: 78, gapLyrics: 88, lyricY: 95, clefTop: 10 };
+
+// Zeilen aufteilen und Notenpositionen festlegen. Gleichzeitige Noten beider Hände stehen
+// genau übereinander: Jeder Takt besteht aus Spalten (Einsatzzeiten), die Spalte ist so breit
+// wie ihr breitestes Element.
+export function layoutScore(song, hands = 'both') {
+  const grand = !!song.left;
+  const voices = voicesOf(song);
+  const parsed = voices.map((v) => accidentalsShown(parseMelody(song[v.key]), song.key));
+  if (grand && parsed[0].length !== parsed[1].length) throw new Error(`${song.title ?? 'Lied'}: rechte und linke Hand haben unterschiedlich viele Takte`);
   const lyrics = song.lyrics ? parseLyrics(song.lyrics) : null;
-  if (lyrics) for (const n of measures.flat()) if (n.index !== undefined) n.lyric = lyrics[n.index] ?? '';
-  const natural = measures.map((m) => SCORE.measurePad + m.reduce((s, n) => s + widthOf(n), 0) + 3);
+  if (lyrics) for (const n of parsed[0].flat()) if (n.index !== undefined) n.lyric = lyrics[n.index] ?? '';
+  // Index = Nummer des Ereignisses, in dem die Note angeschlagen wird (für Markierung und Cursor)
+  const eventOf = new Map();
+  for (const e of songEvents(song, hands)) for (const n of e.notes) eventOf.set(`${n.hand}:${n.noteIndex}`, e.index);
+  parsed.forEach((measures, vi) => {
+    const passive = !plays(song, hands, voices[vi]);
+    for (const n of measures.flat()) {
+      n.staff = voices[vi].clef;
+      if (n.rest) continue;
+      n.noteIndex = n.index;
+      n.index = n.index === undefined ? undefined : eventOf.get(`${voices[vi].hand}:${n.index}`);
+      if (passive) n.passive = true;
+    }
+  });
+
+  const columns = parsed[0].map((_, mi) => {
+    const cols = new Map();
+    for (const measures of parsed) {
+      let t = 0;
+      for (const n of measures[mi]) {
+        const k = Math.round(t * 1000);
+        if (!cols.has(k)) cols.set(k, []);
+        cols.get(k).push(n);
+        t += n.beats;
+      }
+    }
+    // Platz richtet sich nach der Zeit bis zum nächsten Einsatz: Eine lange Note der einen Hand
+    // verteilt sich über die Spalten der anderen (bei einer Hand allein ist das genau die Notenlänge)
+    const total = parsed[0][mi].reduce((s, n) => s + n.beats, 0);
+    const sorted = [...cols.entries()].sort((a, b) => a[0] - b[0]);
+    return sorted.map(([k, items], ci) => {
+      const span = ((ci + 1 < sorted.length ? sorted[ci + 1][0] : Math.round(total * 1000)) - k) / 1000;
+      const room = (n) => advance({ beats: Math.min(n.beats, span) });
+      const acc = Math.max(0, ...items.map((n) => (n.showAcc ? ACC_WIDTH : 0)));
+      const body = Math.max(...items.map((n) => (n.rest ? room(n) : Math.max(room(n), lyricWidth(n.lyric)))));
+      return { items, acc, body, width: acc + body };
+    });
+  });
+  const natural = columns.map((cs) => SCORE.measurePad + cs.reduce((s, c) => s + c.width, 0) + 3);
   const ks = keySigWidth(song.key);
   const lines = [];
   let current = null;
-  measures.forEach((m, i) => {
+  natural.forEach((w, i) => {
     const room = SCORE.lineContent - ks - (lines.length === 0 && !current ? SCORE.timeSigWidth : 0);
-    if (!current || current.width + natural[i] > current.room) {
+    if (!current || current.width + w > current.room) {
       current = { measures: [], width: 0, room };
       lines.push(current);
     }
     current.measures.push(i);
-    current.width += natural[i];
+    current.width += w;
   });
 
-  const width = SCORE.clefArea + SCORE.lineContent + SCORE.right;
-  return {
+  const width = SCORE.clefArea + SCORE.lineContent + SCORE.right + (grand ? GRAND.brace : 0);
+  const dyBass = grand ? (lyrics ? GRAND.gapLyrics : GRAND.gap) : 0;
+  const result = {
     width,
     time: song.time,
     key: song.key ?? 'C',
     lyrics: !!lyrics,
-    height: lyrics ? GEOMETRY.height + 10 : GEOMETRY.height, // Platz für den Text unter dem System
+    grand,
+    dyBass,
+    lyricY: grand ? GRAND.lyricY : GEOMETRY.height + 6,
+    // Platz für den Text unter dem System bzw. zwischen den Systemen
+    height: grand ? dyBass + GEOMETRY.height : lyrics ? GEOMETRY.height + 10 : GEOMETRY.height,
     keySigWidth: ks,
     lines: lines.map((line, li) => {
       const start = SCORE.clefArea + ks + (li === 0 ? SCORE.timeSigWidth : 0);
@@ -166,16 +273,17 @@ export function layoutScore(song) {
       const bars = [];
       for (const mi of line.measures) {
         let nx = x + SCORE.measurePad * scale;
-        for (const n of measures[mi]) {
-          if (n.rest) {
-            rests.push({ ...n, measure: mi, x: +(nx + (advance(n) / 2 - 2) * scale).toFixed(2) });
-            nx += advance(n) * scale;
-            continue;
+        for (const c of columns[mi]) {
+          const cx = +(nx + (c.acc + c.body / 2 - 2) * scale).toFixed(2);
+          for (const n of c.items) {
+            if (n.rest) {
+              rests.push({ ...n, measure: mi, x: cx });
+              continue;
+            }
+            const step = staffStep(n.staff, n.note);
+            notes.push({ ...n, measure: mi, step, x: cx, y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
           }
-          const step = staffStep('treble', n.note);
-          const x = nx + ((n.showAcc ? ACC_WIDTH : 0) + (widthOf(n) - (n.showAcc ? ACC_WIDTH : 0)) / 2 - 2) * scale;
-          notes.push({ ...n, measure: mi, step, x: +x.toFixed(2), y: stepY(step), ledgerYs: ledgerSteps(step).map(stepY), stemUp: step < 4 });
-          nx += widthOf(n) * scale;
+          nx += c.width * scale;
         }
         x += natural[mi] * scale;
         bars.push(x);
@@ -183,6 +291,21 @@ export function layoutScore(song) {
       return { index: li, first: li === 0, last, notes, rests, bars };
     }),
   };
+  if (grand) Object.assign(result, grandBounds(result));
+  return result;
+}
+
+// Klaviersystem: Bild auf den tatsächlich benutzten Bereich zuschneiden (gleich für alle Zeilen,
+// damit nichts springt) – oben Violinschlüssel bzw. höchste Note, unten tiefste Note der linken Hand
+function grandBounds(layout) {
+  const all = layout.lines.flatMap((l) => l.notes);
+  const middle = stepY(4);
+  const reach = (n) => Math.max(SCORE.stemLength, n.stemUp ? n.y - middle : middle - n.y) + 2;
+  const tops = all.filter((n) => n.staff === 'treble').map((n) => Math.min(n.y - 7, n.value !== 'w' && n.stemUp ? n.y - reach(n) : Infinity));
+  const bottoms = all.filter((n) => n.staff === 'bass').map((n) => Math.max(n.y + 7, n.value !== 'w' && !n.stemUp ? n.y + reach(n) : -Infinity));
+  const top = Math.floor(Math.min(GRAND.clefTop, ...tops));
+  const bottom = Math.ceil(layout.dyBass + Math.max(stepY(0) + 6, ...bottoms));
+  return { top, height: bottom - top };
 }
 
 // --- Formen (um den Notenmittelpunkt) ---
@@ -260,6 +383,7 @@ function noteShape(n) {
 
 // Eine Zeile als SVG. states: { [Notenindex]: 'right' | 'wrong' }, current: Index der aktuellen Note
 export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, label = 'Notenzeile' } = {}) {
+  if (layout.grand) return renderGrandLine(layout, lineIndex, { states, current, label });
   const g = GEOMETRY;
   const line = layout.lines[lineIndex];
   const top = stepY(8);
@@ -315,6 +439,98 @@ export function renderScoreLine(layout, lineIndex, { states = {}, current = -1, 
         '</g>'
       : '') +
     `</svg>`
+  );
+}
+
+// Ein System (Violin- oder Bassschlüssel) des Klaviersystems, um dy nach unten verschoben
+function staffBlock(layout, line, clef, dy, states) {
+  const g = GEOMETRY;
+  const notes = line.notes.filter((n) => n.staff === clef);
+  const rests = line.rests.filter((r) => r.staff === clef);
+  const staffLines = [0, 2, 4, 6, 8].map((s) => `<line class="staff-line" x1="${g.lineLeft}" y1="${stepY(s)}" x2="${layout.width - GRAND.brace - 4}" y2="${stepY(s)}"/>`).join('');
+  const tx = SCORE.clefArea + layout.keySigWidth + 7;
+  const time = line.first
+    ? `<g class="time" font-family="'Times New Roman', Georgia, serif" font-weight="700" font-size="21" text-anchor="middle" fill="currentColor">` +
+      `<text x="${tx}" y="${stepY(6) + 7.3}">${layout.time[0]}</text><text x="${tx}" y="${stepY(2) + 7.3}">${layout.time[1]}</text></g>`
+    : '';
+  const keySig = keySignatureNotes(clef, layout.key)
+    .map((note, i) => accidentalSvg(keySignatureType(layout.key), SCORE.clefArea + 3 + i * 9, stepY(staffStep(clef, note))).replace('class="accidental"', 'class="accidental key"'))
+    .join('');
+  const ledgers = notes
+    .flatMap((n) => n.ledgerYs.map((y) => `<line class="ledger-line" data-index="${n.index ?? ''}" x1="${+(n.x - SCORE.ledgerHalf).toFixed(2)}" y1="${y}" x2="${+(n.x + SCORE.ledgerHalf).toFixed(2)}" y2="${y}"/>`))
+    .join('');
+  const noteEls = notes
+    .map(
+      (n) =>
+        `<g class="note${n.tiedFrom ? ' tied' : ''}${n.passive ? ' passive' : ''}${states[n.index] && !n.passive ? ` ${states[n.index]}` : ''}" data-note="${n.note}" data-index="${n.index ?? ''}" data-staff="${clef}" data-value="${n.value}${n.dotted ? '.' : ''}" ` +
+        `transform="translate(${n.x} ${n.y})" fill="currentColor">${noteShape(n)}</g>`,
+    )
+    .join('');
+  return (
+    `<g class="staff-block" data-clef="${clef}" transform="translate(0 ${dy})">` +
+    `<g class="staff-lines" stroke="currentColor" stroke-width="${g.lineWidth}">${staffLines}</g>` +
+    `<g class="clef" data-clef="${clef}" transform="translate(${g.clefX} ${stepY(CLEFS[clef].anchorStep)}) scale(${SPACE})" fill="currentColor">${CLEF_SHAPES[clef]}</g>` +
+    keySig +
+    time +
+    `<g class="ledger-lines" stroke="currentColor" stroke-width="${g.ledgerWidth}">${ledgers}</g>` +
+    tieArcs(notes) +
+    rests.map((r) => `<g class="rest" data-value="${r.value}${r.dotted ? '.' : ''}" transform="translate(${r.x} 0)" fill="currentColor">${restShape(r)}</g>`).join('') +
+    noteEls +
+    '</g>'
+  );
+}
+
+// Geschweifte Klammer links vom Klaviersystem (von y1 bis y2, rechte Kante bei x)
+function brace(x, y1, y2) {
+  const m = (y1 + y2) / 2;
+  const h = y2 - y1;
+  const w = 6;
+  return (
+    `<path class="brace" fill="currentColor" d="M${x} ${y1}` +
+    `C${x - w} ${y1 + h * 0.08} ${x - 1} ${m - h * 0.12} ${x - w} ${m}` +
+    `C${x - 1} ${m + h * 0.12} ${x - w} ${y2 - h * 0.08} ${x} ${y2}` +
+    `C${x - w + 2} ${y2 - h * 0.1} ${x + 1.2} ${m + h * 0.12} ${x - w + 2.6} ${m}` +
+    `C${x + 1.2} ${m - h * 0.12} ${x - w + 2} ${y1 + h * 0.1} ${x} ${y1}Z"/>`
+  );
+}
+
+// Zeile im Klaviersystem: oben rechte Hand (Violinschlüssel), unten linke Hand (Bassschlüssel),
+// Taktstriche durch beide Systeme, Liedtext zwischen den Systemen.
+function renderGrandLine(layout, lineIndex, { states, current, label }) {
+  const g = GEOMETRY;
+  const line = layout.lines[lineIndex];
+  const top = stepY(8);
+  const bottom = layout.dyBass + stepY(0);
+  const cur = line.notes.find((n) => n.index === current && !n.passive);
+  const cursor = cur ? `<rect class="cursor" x="${cur.x - 10}" y="${layout.top + 2}" width="20" height="${layout.height - 4}" rx="5"/>` : '';
+  const bars = line.bars
+    .map((x, i) => {
+      const end = line.last && i === line.bars.length - 1;
+      return end
+        ? `<line class="bar-line" x1="${+(x - 5).toFixed(2)}" y1="${top}" x2="${+(x - 5).toFixed(2)}" y2="${bottom}" stroke-width="1.1"/>` +
+            `<line class="bar-line final" x1="${+(x - 1.5).toFixed(2)}" y1="${top}" x2="${+(x - 1.5).toFixed(2)}" y2="${bottom}" stroke-width="3"/>`
+        : `<line class="bar-line" x1="${+x.toFixed(2)}" y1="${top}" x2="${+x.toFixed(2)}" y2="${bottom}" stroke-width="1.1"/>`;
+    })
+    .join('');
+  const lyrics = layout.lyrics
+    ? `<g class="lyrics" font-size="${LYRIC_SIZE}" text-anchor="middle" fill="currentColor">` +
+      line.notes
+        .filter((n) => n.lyric && n.staff === 'treble')
+        .map((n) => `<text class="lyric" data-index="${n.index ?? ''}" x="${n.x}" y="${layout.lyricY}">${escapeXml(n.lyric)}</text>`)
+        .join('') +
+      '</g>'
+    : '';
+  return (
+    `<svg class="staff seq score grand" viewBox="0 ${layout.top} ${layout.width} ${layout.height}" style="--seq-ratio: ${layout.width / layout.height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}">` +
+    brace(GRAND.brace - 0.5, top, bottom) +
+    `<g transform="translate(${GRAND.brace} 0)">` +
+    cursor +
+    `<line class="system-line" x1="${g.lineLeft}" y1="${top}" x2="${g.lineLeft}" y2="${bottom}" stroke="currentColor" stroke-width="1.2"/>` +
+    `<g class="bar-lines" stroke="currentColor">${bars}</g>` +
+    staffBlock(layout, line, 'treble', 0, states) +
+    staffBlock(layout, line, 'bass', layout.dyBass, states) +
+    lyrics +
+    '</g></svg>'
   );
 }
 

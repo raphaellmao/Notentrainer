@@ -3,7 +3,7 @@
 import { CLEFS, germanName, helmholtzName, frequency, noteFromMidi, parseNote, midiNumber, keyOf, asFlat } from './notes.js';
 import { Microphone } from './mic.js';
 import { SONGS } from './songs.js';
-import { layoutScore, renderScoreLine, parseMelody, songNotes } from './score.js';
+import { layoutScore, renderScoreLine, parseMelody, songNotes, songEvents, songKeyboard, handsFor } from './score.js';
 import { importAbc } from './abc.js';
 import { schedule, judge, missedAfter, summarizeRhythm, TIMING_TEXT, SYNC, estimateOffset, cleanOffsets, systematicShift } from './rhythm.js';
 import { TuningSession, MIN_SAMPLES, nearestNote } from './tuning.js';
@@ -89,6 +89,7 @@ const ui = {
   sumRhythmHint: $('#sum-rhythm-hint'),
   rhythmBtn: $('#rhythm-btn'),
   rhythmTempo: $('#rhythm-tempo'),
+  hands: $('#hands'),
   songbar: $('#songbar'),
   songTitle: $('#song-title'),
   songLine: $('#song-line'),
@@ -109,7 +110,7 @@ let toastTimer = 0;
 let viewBeforeOverview = 'play';
 
 function loadSettings() {
-  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null, rhythmTempo: 0.8, rhythmOffset: { touch: 0, mic: 0 } };
+  const fallback = { mode: 'treble', level: 1, sound: true, refA: 440, song: null, rhythmTempo: 0.8, rhythmOffset: { touch: 0, mic: 0 }, hands: 'both' };
   try {
     const saved = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}');
     return {
@@ -122,6 +123,8 @@ function loadSettings() {
       rhythmTempo: [0.6, 0.8, 1].includes(saved.rhythmTempo) ? saved.rhythmTempo : fallback.rhythmTempo,
       // Takt-Abgleich: gemessene Verzögerung beim Tippen bzw. über das Mikrofon (ms)
       rhythmOffset: cleanOffsets(saved.rhythmOffset),
+      // Lieder mit Begleitung: welche Hand spielt
+      hands: ['both', 'right', 'left'].includes(saved.hands) ? saved.hands : fallback.hands,
     };
   } catch {
     return fallback;
@@ -296,7 +299,9 @@ function showSongs() {
     const del = song.imported ? `<button type="button" class="song-delete" data-delete="${song.id}" aria-label="${escapeHtml(song.title)} entfernen">Entfernen</button>` : '';
     return (
       `<div class="song-row"><button type="button" class="song-card" data-song="${song.id}"><b>${escapeHtml(song.title)}</b>` +
-      `<span>${escapeHtml(song.origin)}</span><span>${notes.length} Noten · ${helmholtzName(range[0].note)} bis ${helmholtzName(range[range.length - 1].note)} · ${song.time.join('/')}-Takt</span></button>${del}</div>`
+      `<span>${escapeHtml(song.origin)}</span><span>${notes.length} Noten · ${helmholtzName(range[0].note)} bis ${helmholtzName(range[range.length - 1].note)} · ${song.time.join('/')}-Takt</span>` +
+      (song.left ? '<span class="song-hands">🎹 mit linker Hand (Klaviersystem)</span>' : '') +
+      `</button>${del}</div>`
     );
   };
   ui.songList.innerHTML =
@@ -305,11 +310,21 @@ function showSongs() {
   setView('songs');
 }
 
+// Ereignis des Lieds → Aufgabe: Einzelnote oder Zusammenklang (notes) beider Hände
+const eventItem = (e) => ({
+  clef: e.notes[0].clef,
+  note: e.notes[0].note,
+  notes: e.notes.length > 1 ? e.notes.map((n) => ({ clef: n.clef, note: n.note })) : undefined,
+});
+
 function startSong(song) {
   currentSong = song;
-  songLayout = layoutScore(song);
-  trainer.startSong(songNotes(song).map((n) => n.note));
+  const hands = handsFor(song, settings.hands);
+  songLayout = layoutScore(song, hands);
+  trainer.startSong(songEvents(song, hands).map(eventItem));
   seqStates = [];
+  ui.hands.hidden = !song.left;
+  ui.hands.value = settings.hands;
   ui.songTitle.textContent = song.title;
   ui.songbar.hidden = false;
   setView('play');
@@ -357,7 +372,7 @@ async function startRhythm() {
   clearTimeout(timer);
   piano.unlock();
   if (piano.ctx && piano.ctx.state !== 'running') await piano.ctx.resume().catch(() => {});
-  const sched = schedule(currentSong, settings.rhythmTempo);
+  const sched = schedule(currentSong, settings.rhythmTempo, handsFor(currentSong, settings.hands));
   // Lied von vorn
   startSong(currentSong);
   locked = false;
@@ -399,6 +414,7 @@ async function startRhythm() {
     if (note && now > missedAfter(note, rhythm.sched.quarterMs)) {
       // verpasst: Lied läuft weiter wie echte Musik
       rhythm.results.push({ timing: 'missed', delta: null, correct: false });
+      rhythm.chordTiming = null;
       seqStates[trainer.position] = 'wrong';
       const res = trainer.skip();
       ui.feedback.className = 'feedback wrong';
@@ -429,12 +445,20 @@ function answerInRhythm(tapped, at, source) {
   if (delta < -rhythm.sched.beatMs * 1.5) return; // noch beim Einzählen: ignorieren
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
   const timing = judge(delta, rhythm.sched.quarterMs);
-  const result = trainer.answer(tapped, 1000);
-  rhythm.results.push({ timing, delta, correct: result.correct, source });
-  seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
-  marks = { [tapped]: result.correct ? 'right' : 'wrong' };
-  if (!result.correct) marks[keyOf(result.item.note)] = 'right';
+  const result = trainer.answer(tapped, 1000, { anyOf: source === 'mic' && !!trainer.current?.notes });
+  if (result.ignored) return;
+  marks = marksFor(result, tapped);
   drawKeyboard();
+  if (result.partial) {
+    // Zusammenklang: Zeitpunkt der ersten Taste zählt
+    rhythm.chordTiming ??= { timing, delta };
+    showFeedback(result, tapped);
+    return;
+  }
+  const first = rhythm.chordTiming ?? { timing, delta };
+  rhythm.chordTiming = null;
+  rhythm.results.push({ timing: first.timing, delta: first.delta, correct: result.correct, source });
+  seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
   const keysShown = marks;
   setTimeout(() => {
     if (marks === keysShown) {
@@ -442,11 +466,12 @@ function answerInRhythm(tapped, at, source) {
       drawKeyboard();
     }
   }, 250);
-  ui.feedback.className = `feedback ${result.correct ? 'right' : 'wrong'} timing-${timing}`;
+  const names = result.correct && result.notes?.length > 1 ? result.notes.map(germanName).join(' + ') : germanName(result.item.note);
+  ui.feedback.className = `feedback ${result.correct ? 'right' : 'wrong'} timing-${first.timing}`;
   ui.feedback.innerHTML =
     `<span class="verdict">${result.correct ? 'Richtig' : 'Falsch'}</span>` +
-    `<span class="name">${germanName(result.item.note)}</span>` +
-    `<span class="timing">${TIMING_TEXT[timing]}</span>`;
+    `<span class="name">${names}</span>` +
+    `<span class="timing">${TIMING_TEXT[first.timing]}</span>`;
   advanceRhythm(result.done);
 }
 
@@ -477,11 +502,16 @@ async function playSong() {
   if (!piano.ctx) return showToast('Dieser Browser kann keine Töne abspielen.');
   if (piano.ctx.state !== 'running') return showToast('Ton ist noch nicht freigegeben – bitte nochmal tippen.');
   const quarter = 60 / currentSong.tempo;
-  let t = 0.1;
-  for (const n of parseMelody(currentSong.melody).flat()) {
-    if (!n.rest && !n.tiedFrom) piano.voice(frequency(n.note), t); // Pausen und Haltebögen klingen nicht neu
-    t += n.beats * quarter;
+  let end = 0;
+  for (const text of [currentSong.melody, currentSong.left].filter(Boolean)) {
+    let t = 0.1;
+    for (const n of parseMelody(text).flat()) {
+      if (!n.rest && !n.tiedFrom) piano.voice(frequency(n.note), t); // Pausen und Haltebögen klingen nicht neu
+      t += n.beats * quarter;
+    }
+    end = Math.max(end, t);
   }
+  const t = end;
   playbackUntil = performance.now() + t * 1000 + 800;
   if (mic.active) showToast('Beim Anhören wertet das Mikrofon nicht.');
 }
@@ -546,7 +576,9 @@ function drawKeyboard() {
   const clef = trainer.current?.clef ?? (settings.mode === 'bass' ? 'bass' : 'treble');
   const { width, height } = ui.keyboard.getBoundingClientRect();
   if (!width || !height) return;
-  layout = keyboardLayout(CLEFS[clef].keyboard, width, height);
+  // Lieder: eine feste Klaviatur fürs ganze Lied (mit Begleitung über beide Hände)
+  const range = settings.level === 'lieder' && currentSong ? songKeyboard(currentSong) : CLEFS[clef].keyboard;
+  layout = keyboardLayout(range, width, height);
   ui.keyboard.innerHTML = renderKeyboard(layout, { marks });
 }
 
@@ -565,6 +597,20 @@ function showFeedback(result, tapped) {
     return;
   }
   const { correct, item } = result;
+  if (result.partial) {
+    // Zusammenklang: erst ein Teil gedrückt
+    const rest = result.missing.length;
+    ui.feedback.className = 'feedback right partial';
+    ui.feedback.innerHTML = `<span class="verdict">Richtig</span><span class="name">${germanName(result.hit.note)}</span><span class="played">noch ${rest === 1 ? 'eine Taste' : `${rest} Tasten`}</span>`;
+    return;
+  }
+  if (correct && result.notes?.length > 1) {
+    ui.feedback.className = 'feedback right';
+    ui.feedback.innerHTML =
+      `<span class="verdict">Richtig</span><span class="name">${result.notes.map(germanName).join(' + ')}</span>` +
+      `<span class="octave">${result.notes.map(helmholtzName).join(' + ')}</span>`;
+    return;
+  }
   let played = '';
   if (!correct) {
     // gleiche Taste, andere Oktave? (auch bei schwarzen Tasten, z. B. b¹ statt b²)
@@ -602,7 +648,11 @@ const mic = new Microphone({
     const showHeard = lastHeard && now - lastHeard.at < 500;
     heard.textContent = showHeard ? `höre: ${helmholtzName(noteFromMidi(lastHeard.midi))}` : '';
     ui.feedback.querySelector('.listen-text').textContent =
-      now - lastSoundAt > 8000 ? 'Ich höre nichts – Handy näher ans Klavier?' : 'Spiel die Note am Klavier';
+      now - lastSoundAt > 8000
+        ? 'Ich höre nichts – Handy näher ans Klavier?'
+        : trainer.current?.notes
+          ? 'Zusammenklang – nicht erkannt? Oberste Note einzeln nachspielen'
+          : 'Spiel die Note am Klavier';
   },
   onEnded: () => {
     stopMic();
@@ -852,15 +902,49 @@ function syncMic() {
   if (!locked && document.body.dataset.view === 'play') showFeedback(null);
 }
 
+// Mikrofon bei Zusammenklängen: Es hört nur einen Ton sicher. Erkennt es eine Note des Klangs
+// (auch in anderer Oktave – in der Simulation hörte es bei f + a¹ ein F, bei c + e¹ ein C),
+// zählt der Zusammenklang. Passt nichts (bei e + g¹ hörte es nichts oder Dis), wird es ignoriert
+// statt als Fehler gewertet; dann reicht es, die Melodienote einzeln nachzuspielen.
+function micChordNote(tapped) {
+  const chord = trainer.current?.notes;
+  if (!chord) return tapped;
+  const exact = chord.find((n) => midiNumber(n.note) === midiNumber(tapped));
+  const sameClass = chord.find((n) => (midiNumber(n.note) - midiNumber(tapped)) % 12 === 0);
+  const hit = exact ?? sameClass;
+  return hit ? keyOf(hit.note) : null;
+}
+
+// Tastenfarben nach einer Antwort (bei Zusammenklängen alle Tasten des Klangs)
+function marksFor(result, tapped) {
+  if (result.partial) return { ...marks, [tapped]: 'right' };
+  const m = result.notes?.length > 1 && result.correct ? Object.fromEntries(result.notes.map((n) => [keyOf(n), 'right'])) : { [tapped]: result.correct ? 'right' : 'wrong' };
+  if (!result.correct) for (const n of result.missing ?? [result.item]) m[keyOf(n.note)] = 'right'; // b-Noten liegen auf der Taste mit Kreuz-Namen
+  return m;
+}
+
 function answer(tapped, at = performance.now(), source = 'touch') {
+  const chordByMic = source === 'mic' && trainer.current?.notes;
+  if (chordByMic) {
+    tapped = micChordNote(tapped);
+    if (!tapped) return; // Mischklang nicht sicher erkannt: nicht als Fehler werten
+  }
   if (rhythm) return answerInRhythm(tapped, at, source);
   locked = true;
   // im Mikrofon-Modus kein eigener Ton – sonst hört sich die App selbst
   if (settings.sound && !mic.active) piano.play(frequency(tapped));
-  const result = trainer.answer(tapped, performance.now() - shownAt);
-  marks = { [tapped]: result.correct ? 'right' : 'wrong' };
-  if (!result.correct) marks[keyOf(result.item.note)] = 'right'; // b-Noten liegen auf der Taste mit Kreuz-Namen
+  const result = trainer.answer(tapped, performance.now() - shownAt, { anyOf: !!chordByMic });
+  if (result.ignored) {
+    locked = false;
+    return;
+  }
+  marks = marksFor(result, tapped);
   drawKeyboard();
+  if (result.partial) {
+    showFeedback(result, tapped);
+    locked = false; // weitere Tasten des Zusammenklangs
+    return;
+  }
   showFeedback(result, tapped);
   const { answered, total } = trainer.progress;
   ui.progress.style.width = `${(answered / total) * 100}%`;
@@ -990,6 +1074,14 @@ ui.rhythmTempo.addEventListener('change', () => {
   if (rhythm) startRhythm();
 });
 ui.otherSong.addEventListener('click', showSongs);
+ui.hands.addEventListener('change', () => {
+  settings.hands = ui.hands.value;
+  saveSettings();
+  stopRhythm();
+  clearTimeout(timer);
+  if (currentSong) startSong(currentSong);
+  if (mic.active && settings.hands === 'both') showToast('Mit Mikrofon zählt bei Zusammenklängen schon ein erkannter Ton.');
+});
 
 ui.sound.addEventListener('click', () => {
   settings.sound = !settings.sound;

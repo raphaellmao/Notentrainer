@@ -235,14 +235,16 @@ export class Trainer {
     return this.level === 'folgen' || this.level === 'lieder';
   }
 
-  // Stufe 4: ein ganzes Lied (Violinschlüssel) – die Runde ist so lang wie das Lied
-  startSong(notes) {
+  // Stufe 4: ein ganzes Lied – die Runde ist so lang wie das Lied. items: Notennamen (Melodie im
+  // Violinschlüssel) oder { clef, note, notes? } – notes: Zusammenklang beider Hände, alle Tasten nötig
+  startSong(items) {
     this.answers = [];
-    this.sequence = notes.map((note) => ({ clef: 'treble', note }));
-    this.roundLength = notes.length;
+    this.sequence = items.map((it) => (typeof it === 'string' ? { clef: 'treble', note: it } : it));
+    this.roundLength = this.sequence.length;
     this.position = 0;
+    this.pending = null;
     this.current = this.sequence[0];
-    this.previous = this.sequence[notes.length - 1];
+    this.previous = this.sequence[this.sequence.length - 1];
     return this.sequence;
   }
 
@@ -265,6 +267,7 @@ export class Trainer {
   // Stufe 3: zur nächsten Note der Folge; null, wenn die Folge zu Ende ist
   advance() {
     this.position += 1;
+    this.pending = null;
     this.current = this.sequence?.[this.position] ?? null;
     return this.current;
   }
@@ -272,19 +275,48 @@ export class Trainer {
   // Im Takt: Note verpasst – zählt in der Runde als falsch, aber nicht in der Statistik der Note
   skip() {
     const item = this.current;
+    this.pending = null;
     this.answers.push({ item, tapped: null, correct: false, ms: 0, missed: true, unlocked: [] });
     return { correct: false, item, unlocked: [], done: this.answers.length >= this.roundLength };
   }
 
   // tapped: Note der angetippten Taste (schwarze Tasten zählen immer als falsch)
-  answer(tapped, ms) {
+  // anyOf: bei Zusammenklängen genügt eine der Noten (Mikrofon hört nur einen Ton sicher)
+  answer(tapped, ms, { anyOf = false } = {}) {
     const item = this.current;
+    if (item.notes?.length > 1) return this.answerChord(tapped, ms, anyOf);
     const correct = sameKey(tapped, item.note); // Fis und Ges sind dieselbe Taste
     recordAnswer(this.stats, item, correct, ms);
     saveStats(this.storage, this.stats);
     const unlocked = this.level === 'aufbau' ? this.unlockIfReady(item.clef) : [];
     this.answers.push({ item, tapped, correct, ms, unlocked });
     return { correct, item, unlocked, done: this.answers.length >= this.roundLength };
+  }
+
+  // Zusammenklang: jede richtige Taste zählt einzeln, das Ereignis ist erst mit allen Tasten geschafft.
+  // Eine falsche Taste beendet es als Fehler (gezählt bei der ersten noch fehlenden Note).
+  answerChord(tapped, ms, anyOf) {
+    const chord = this.current;
+    const notes = chord.notes.map((n) => n.note);
+    if (!this.pending) this.pending = chord.notes.map((n) => ({ clef: n.clef, note: n.note }));
+    const done = () => this.answers.length >= this.roundLength;
+    const hit = this.pending.find((n) => sameKey(tapped, n.note));
+    if (hit) {
+      recordAnswer(this.stats, hit, true, ms);
+      saveStats(this.storage, this.stats);
+      this.pending = anyOf ? [] : this.pending.filter((n) => n !== hit);
+      if (this.pending.length) return { correct: true, partial: true, item: chord, notes, hit, missing: [...this.pending], unlocked: [], done: false };
+      this.answers.push({ item: chord, tapped, correct: true, ms, unlocked: [] });
+      return { correct: true, item: chord, notes, hit, missing: [], unlocked: [], done: done() };
+    }
+    // dieselbe Taste ein zweites Mal: nichts passiert
+    if (notes.some((n) => sameKey(tapped, n))) return { ignored: true, correct: true, partial: true, item: chord, notes, missing: [...this.pending], unlocked: [], done: false };
+    const miss = this.pending[0];
+    const missing = [...this.pending];
+    recordAnswer(this.stats, miss, false, ms);
+    saveStats(this.storage, this.stats);
+    this.answers.push({ item: miss, tapped, correct: false, ms, unlocked: [] });
+    return { correct: false, item: miss, notes, missing, unlocked: [], done: done() };
   }
 
   // Im Aufbau die nächsten Noten freischalten, falls die bisherigen sitzen. Freigeschaltetes bleibt.
