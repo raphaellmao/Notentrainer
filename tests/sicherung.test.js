@@ -24,6 +24,7 @@ const phone = () =>
     'notentrainer.aufbau.v1': JSON.stringify({ treble: 8, bass: 4 }),
     'notentrainer.einstellungen.v1': JSON.stringify({ mode: 'treble', level: 'lieder', sound: true, refA: 431.2, song: 'imp-x' }),
     'notentrainer.lieder.v1': JSON.stringify([{ id: 'imp-x', title: 'Mein Lied', melody: 'C4q D4q E4h', time: [4, 4] }]),
+    'notentrainer.verlauf.v1': JSON.stringify({ '2026-11-21': { notes: 40, right: 35, ms: 90000, rounds: 2 }, '2026-11-22': { notes: 20, right: 19, ms: 40000, rounds: 1 } }),
     'andere.app': 'bleibt unberührt',
   });
 
@@ -31,7 +32,7 @@ test('Sicherung enthält alle App-Daten, aber keine fremden Daten', () => {
   const file = JSON.parse(createBackup(phone(), new Date('2026-11-22T10:00:00Z')));
   assert.equal(file.format, 'notentrainer-lernstand');
   assert.equal(file.savedAt, '2026-11-22T10:00:00.000Z');
-  assert.deepEqual(Object.keys(file.data), ['notentrainer.aufbau.v1', 'notentrainer.einstellungen.v1', 'notentrainer.lieder.v1', 'notentrainer.statistik.v1']);
+  assert.deepEqual(Object.keys(file.data), ['notentrainer.aufbau.v1', 'notentrainer.einstellungen.v1', 'notentrainer.lieder.v1', 'notentrainer.statistik.v1', 'notentrainer.verlauf.v1']);
   assert.equal(backupFileName(new Date('2026-11-22T10:00:00Z')), 'notentrainer-lernstand-2026-11-22.json');
 });
 
@@ -39,7 +40,7 @@ test('Wiederherstellen auf neuem Handy ergibt genau den alten Stand', () => {
   const backup = createBackup(phone());
   const neu = store({ 'andere.app': 'fremd' });
   const { data, summary } = parseBackup(backup);
-  assert.deepEqual(summary, { notes: 2, attempts: 7, songs: 1 });
+  assert.deepEqual(summary, { notes: 2, attempts: 7, songs: 1, days: 2 });
   restoreBackup(neu, data);
   for (const [k, v] of Object.entries(phone().dump())) if (k.startsWith('notentrainer.')) assert.equal(neu.getItem(k), v, k);
   assert.equal(neu.getItem('andere.app'), 'fremd', 'fremde Daten unberührt');

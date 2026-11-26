@@ -11,6 +11,7 @@ import { renderStaff, renderSequence } from './staff.js';
 import { keyboardLayout, keyAtClientPoint, renderKeyboard } from './keyboard.js';
 import { Trainer, noteOverview, accidentalOverview } from './trainer.js';
 import { createBackup, backupFileName, parseBackup, restoreBackup, undoRestore, hasSafetyCopy } from './backup.js';
+import { loadHistory, saveHistory, recordNote, recordRound, lastDays, weekSummary, renderHistoryChart } from './history.js';
 import { Piano } from './audio.js';
 
 const SETTINGS_KEY = 'notentrainer.einstellungen.v1';
@@ -59,6 +60,11 @@ const allSongs = () => [...SONGS, ...userSongs];
 // angelegt) und die App startete bis Version 1.9.0 immer mit den Standard-Einstellungen.
 const LEVELS = ['aufbau', 1, 2, 'vorzeichen', 'folgen', 'lieder'];
 const settings = loadSettings();
+const practice = loadHistory(storage); // Übungsverlauf je Tag
+function logNote(correct, ms) {
+  recordNote(practice, correct, ms);
+  saveHistory(storage, practice);
+}
 const trainer = new Trainer({ storage });
 const piano = new Piano();
 
@@ -165,9 +171,40 @@ function showToast(text) {
 const noteList = (items) =>
   items.map((it) => (settings.mode === 'mixed' ? `${helmholtzName(it.note)} (${it.clef === 'treble' ? 'Violin' : 'Bass'})` : helmholtzName(it.note))).join(', ');
 
+const percent = (rate) => `${Math.round(rate * 100)} %`;
+const dayText = (n) => (n === 1 ? 'an 1 Tag' : `an ${n} Tagen`);
+
+// Übungsverlauf: letzte 7 Tage, Vergleich mit der Woche davor, Säulen der letzten 14 Tage
+function renderHistory() {
+  const box = $('#history');
+  const s = weekSummary(practice);
+  if (!s.total.notes) {
+    box.innerHTML = '<h3>Übungsverlauf</h3><p class="note-small">Noch kein Verlauf – er beginnt mit der nächsten Übung.</p>';
+    return;
+  }
+  const w = s.week;
+  const line = w.notes
+    ? `Letzte 7 Tage: <b>${w.notes.toLocaleString('de-DE')} Noten</b> · ${percent(w.rate)} richtig · ${dayText(w.active)}${w.minutes ? ` · etwa ${w.minutes} Min.` : ''}`
+    : 'In den letzten 7 Tagen nicht geübt.';
+  const p = s.previous;
+  let compare = '';
+  if (w.notes && p.notes) {
+    const diff = Math.round((w.rate - p.rate) * 100);
+    compare = `Woche davor: ${percent(p.rate)} richtig (${p.notes.toLocaleString('de-DE')} Noten)` + (diff ? ` – jetzt ${diff > 0 ? `${diff} Punkte besser` : `${-diff} Punkte schwächer`}` : ' – gleich gut');
+  }
+  const since = new Date(`${s.first}T12:00`).toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric', year: 'numeric' });
+  box.innerHTML =
+    '<h3>Übungsverlauf</h3>' +
+    `<p class="history-sum">${line}</p>` +
+    (compare ? `<p class="history-cmp">${compare}</p>` : '') +
+    renderHistoryChart(lastDays(practice, 14)) +
+    `<p class="note-small">Säule = gespielte Noten am Tag, grün = davon richtig. Insgesamt seit ${since}: ${s.total.notes.toLocaleString('de-DE')} Noten, ${percent(s.total.rate)} richtig.</p>`;
+}
+
 function showOverview() {
   stopRhythm();
   if (!OVERLAYS.includes(document.body.dataset.view)) viewBeforeOverview = document.body.dataset.view;
+  renderHistory();
   ui.overviewList.innerHTML = ['treble', 'bass']
     .map((clef) => {
       const items = noteOverview(clef, trainer.stats, trainer.unlocked[clef]);
@@ -245,7 +282,7 @@ async function loadBackup(file) {
   const { summary, savedAt } = parsed;
   const when = savedAt ? new Date(savedAt).toLocaleDateString('de-DE') : 'unbekanntem Datum';
   const ok = window.confirm(
-    `Lernstand vom ${when} wiederherstellen?\n\n${summary.notes} Noten mit ${summary.attempts} Antworten, ${summary.songs} importierte Lieder.\n\n` +
+    `Lernstand vom ${when} wiederherstellen?\n\n${summary.notes} Noten mit ${summary.attempts} Antworten, ${summary.songs} importierte Lieder, Verlauf von ${summary.days} Tagen.\n\n` +
       'Dein jetziger Stand wird dadurch ersetzt. Eine Sicherheitskopie bleibt – du kannst es danach rückgängig machen.',
   );
   if (!ok) return backupMessage('Wiederherstellen abgebrochen – nichts geändert.');
@@ -415,6 +452,7 @@ async function startRhythm() {
       // verpasst: Lied läuft weiter wie echte Musik
       rhythm.results.push({ timing: 'missed', delta: null, correct: false });
       rhythm.chordTiming = null;
+      logNote(false, note.durMs);
       seqStates[trainer.position] = 'wrong';
       const res = trainer.skip();
       ui.feedback.className = 'feedback wrong';
@@ -457,6 +495,7 @@ function answerInRhythm(tapped, at, source) {
   }
   const first = rhythm.chordTiming ?? { timing, delta };
   rhythm.chordTiming = null;
+  logNote(result.correct, note.durMs);
   rhythm.results.push({ timing: first.timing, delta: first.delta, correct: result.correct, source });
   seqStates[trainer.position] = result.correct ? 'right' : 'wrong';
   const keysShown = marks;
@@ -938,6 +977,7 @@ function answer(tapped, at = performance.now(), source = 'touch') {
     locked = false;
     return;
   }
+  if (!result.partial) logNote(result.correct, performance.now() - shownAt);
   marks = marksFor(result, tapped);
   drawKeyboard();
   if (result.partial) {
@@ -963,6 +1003,8 @@ function answer(tapped, at = performance.now(), source = 'touch') {
 
 function showSummary() {
   const s = trainer.summary();
+  recordRound(practice);
+  saveHistory(storage, practice);
   const rhythmRun = lastRhythm; // bei „Im Takt“ gibt das Tempo die Zeit vor – Antwortzeit ohne Aussage
   ui.sumRhythmBox.hidden = !lastRhythm;
   if (lastRhythm) {

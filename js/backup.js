@@ -65,8 +65,10 @@ export function summarize(data) {
   };
   const stats = read('notentrainer.statistik.v1', {});
   const songs = read('notentrainer.lieder.v1', []);
+  const history = read('notentrainer.verlauf.v1', {});
   const attempts = Object.values(stats).reduce((s, x) => s + (x?.attempts ?? 0), 0);
-  return { notes: Object.keys(stats).length, attempts, songs: Array.isArray(songs) ? songs.length : 0 };
+  const days = history && typeof history === 'object' ? Object.keys(history).length : 0;
+  return { notes: Object.keys(stats).length, attempts, songs: Array.isArray(songs) ? songs.length : 0, days };
 }
 
 // Lernstand ersetzen. Vorher wird der bisherige Stand als Sicherheitskopie abgelegt,

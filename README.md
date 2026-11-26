@@ -43,6 +43,10 @@ Reines HTML/CSS/JavaScript, keine Frameworks, kein Build-Schritt. Läuft als PWA
 - **Lieder importieren:** In der Liederliste „Lied importieren (ABC-Noten)“ – ABC-Text einfügen oder .abc-Datei wählen
   (`js/abc.js`). Unterstützt Tonarten inkl. Moll, Vorzeichen, Pausen, Haltebögen, Wiederholungen mit 1./2. Ende;
   Akkorde (oberste Note), Vorschläge und Triolen werden mit Hinweis vereinfacht. Importierte Lieder liegen im Browser.
+- **Übungsverlauf:** Oben in der Übersicht: gespielte Noten und Trefferquote der letzten 7 Tage, Vergleich mit der
+  Woche davor und Säulen für die letzten 14 Tage (`js/history.js`, je Tag in `notentrainer.verlauf.v1`, ein gutes Jahr
+  lang). Übungszeit = Summe der Antwortzeiten, je Note höchstens 10 s. Bewusst ohne „Serie“ – ein freier Tag ist kein
+  Rückschritt. Der Verlauf beginnt mit Version 1.12; ältere Übungen haben kein Datum. Er ist Teil der Sicherung.
 - **Lernstand sichern:** In der Übersicht (Balken-Symbol) „Sichern“ und „Wiederherstellen“ – eine Datei mit Statistik,
   Aufbau, Einstellungen (inkl. Einmessung) und importierten Liedern (`js/backup.js`). Vor dem Wiederherstellen bleibt eine
   Sicherheitskopie, das letzte Wiederherstellen lässt sich rückgängig machen.

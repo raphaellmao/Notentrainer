@@ -296,6 +296,20 @@ body[data-view="overview"] .keys { display: none; }
 .overview h2 { margin: 6px 0 10px; font-size: 22px; }
 .overview h3 { margin: 22px 0 2px; font-size: 18px; }
 .ov-sum { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+/* Übungsverlauf */
+.history { max-width: 520px; margin: 0 auto 18px; padding: 10px 14px 4px; border-radius: 14px; background: var(--seg); text-align: left; }
+.history h3 { margin: 0 0 4px; font-size: 17px; }
+.history-sum { margin: 0; font-size: 15px; }
+.history-cmp { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+.history .note-small { margin: 4px 0 6px; max-width: none; }
+.history-chart { display: block; width: 100%; height: auto; margin-top: 6px; }
+.history-chart .base { stroke: var(--muted); stroke-width: 1; opacity: 0.5; }
+.history-chart .bar-all { fill: var(--wrong); opacity: 0.45; }
+.history-chart .bar-right { fill: var(--right); }
+.history-chart .bar-none { fill: var(--muted); opacity: 0.35; }
+.history-chart text { fill: var(--muted); font-size: 9px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.history-chart .today .wd { fill: var(--text); font-weight: 700; }
+.history-chart .num { font-size: 8px; }
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin: 0; font-size: 14px; }
 .legend span::before {
   content: "";
